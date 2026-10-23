@@ -1,0 +1,115 @@
+"""业务服务层。
+
+Service 负责校验、事务编排与审计，不直接拼接 SQL，也不依赖 UI 组件。
+"""
+
+from app.services.errors import (
+    AuditWriteError,
+    DataAccessError,
+    DeleteBlockedError,
+    DuplicateStudentNoError,
+    DuplicateValueError,
+    InvalidPhotoError,
+    NumberConflictError,
+    PhotoError,
+    PhotoPathError,
+    PhotoStorageError,
+    RecordNotFoundError,
+    ServiceError,
+    TemplateDataError,
+    TemplateError,
+    TemplateNotFoundError,
+    TemplateReadOnlyError,
+    TemplateResourceError,
+    TemplateValidationError,
+    ValidationError,
+)
+from app.services.excel_import_service import (
+    ExcelImportService,
+    ImportIssue,
+    ImportResult,
+)
+from app.services.numbering_service import (
+    CERTIFICATE_TYPES,
+    MAX_SEQUENCE_WIDTH,
+    MIN_SEQUENCE_WIDTH,
+    CertificateType,
+    GeneratedNumber,
+    NumberingRuleView,
+    NumberingService,
+    NumberPreview,
+    compose_certificate_number,
+)
+from app.services.photo_service import PhotoService, PhotoUpdateResult
+from app.services.student_service import StudentPage, StudentQuery, StudentService
+from app.services.template_model import (
+    CertificateTemplate,
+    FontSpec,
+    PhotoElement,
+    TextElement,
+    template_from_json,
+    template_to_json,
+)
+from app.services.template_renderer import (
+    CertificateRenderer,
+    RenderResult,
+    RenderWarning,
+)
+from app.services.template_service import (
+    BUILTIN_TEMPLATE_FILES,
+    SeedResult,
+    TemplateService,
+    TemplateSummary,
+)
+
+__all__ = [
+    "AuditWriteError",
+    "BUILTIN_TEMPLATE_FILES",
+    "CERTIFICATE_TYPES",
+    "CertificateRenderer",
+    "CertificateTemplate",
+    "CertificateType",
+    "DataAccessError",
+    "DeleteBlockedError",
+    "DuplicateStudentNoError",
+    "DuplicateValueError",
+    "ExcelImportService",
+    "FontSpec",
+    "GeneratedNumber",
+    "ImportIssue",
+    "ImportResult",
+    "InvalidPhotoError",
+    "MAX_SEQUENCE_WIDTH",
+    "MIN_SEQUENCE_WIDTH",
+    "NumberConflictError",
+    "NumberPreview",
+    "NumberingRuleView",
+    "NumberingService",
+    "PhotoElement",
+    "PhotoError",
+    "PhotoPathError",
+    "PhotoService",
+    "PhotoStorageError",
+    "PhotoUpdateResult",
+    "RecordNotFoundError",
+    "RenderResult",
+    "RenderWarning",
+    "SeedResult",
+    "ServiceError",
+    "StudentPage",
+    "StudentQuery",
+    "StudentService",
+    "TemplateDataError",
+    "TemplateError",
+    "TemplateNotFoundError",
+    "TemplateReadOnlyError",
+    "TemplateResourceError",
+    "TemplateService",
+    "TemplateSummary",
+    "TemplateValidationError",
+    "TextElement",
+    "ValidationError",
+    "compose_certificate_number",
+    "template_from_json",
+    "template_to_json",
+]

@@ -1,0 +1,180 @@
+{
+  "format_version": 1,
+  "name": "内置其他证书模板",
+  "certificate_type": "other",
+  "canvas_width_mm": 297.0,
+  "canvas_height_mm": 210.0,
+  "elements": [
+    {
+      "id": "title",
+      "type": "text",
+      "text": "其 他 证 书",
+      "x_mm": 48.5,
+      "y_mm": 22.0,
+      "width_mm": 200.0,
+      "height_mm": 24.0,
+      "font": {
+        "family": "Microsoft YaHei",
+        "size_pt": 26.0,
+        "bold": true,
+        "italic": false
+      },
+      "align": "center",
+      "vertical_align": "middle",
+      "wrap": "none"
+    },
+    {
+      "id": "name_label",
+      "type": "text",
+      "text": "姓　　名",
+      "x_mm": 60.0,
+      "y_mm": 62.0,
+      "width_mm": 28.0,
+      "height_mm": 12.0,
+      "font": {
+        "family": "Microsoft YaHei",
+        "size_pt": 14.0,
+        "bold": false,
+        "italic": false
+      },
+      "align": "right",
+      "vertical_align": "middle",
+      "wrap": "none"
+    },
+    {
+      "id": "name_value",
+      "type": "text",
+      "field": "name",
+      "x_mm": 92.0,
+      "y_mm": 62.0,
+      "width_mm": 110.0,
+      "height_mm": 12.0,
+      "font": {
+        "family": "Microsoft YaHei",
+        "size_pt": 14.0,
+        "bold": false,
+        "italic": false
+      },
+      "align": "left",
+      "vertical_align": "middle",
+      "wrap": "none"
+    },
+    {
+      "id": "student_no_label",
+      "type": "text",
+      "text": "学　　号",
+      "x_mm": 60.0,
+      "y_mm": 82.0,
+      "width_mm": 28.0,
+      "height_mm": 12.0,
+      "font": {
+        "family": "Microsoft YaHei",
+        "size_pt": 14.0,
+        "bold": false,
+        "italic": false
+      },
+      "align": "right",
+      "vertical_align": "middle",
+      "wrap": "none"
+    },
+    {
+      "id": "student_no_value",
+      "type": "text",
+      "field": "student_no",
+      "x_mm": 92.0,
+      "y_mm": 82.0,
+      "width_mm": 110.0,
+      "height_mm": 12.0,
+      "font": {
+        "family": "Microsoft YaHei",
+        "size_pt": 14.0,
+        "bold": false,
+        "italic": false
+      },
+      "align": "left",
+      "vertical_align": "middle",
+      "wrap": "none"
+    },
+    {
+      "id": "other_certificate_no_label",
+      "type": "text",
+      "text": "其他证书编号",
+      "x_mm": 54.0,
+      "y_mm": 102.0,
+      "width_mm": 34.0,
+      "height_mm": 12.0,
+      "font": {
+        "family": "Microsoft YaHei",
+        "size_pt": 14.0,
+        "bold": false,
+        "italic": false
+      },
+      "align": "right",
+      "vertical_align": "middle",
+      "wrap": "none"
+    },
+    {
+      "id": "other_certificate_no_value",
+      "type": "text",
+      "field": "other_certificate_no",
+      "x_mm": 92.0,
+      "y_mm": 102.0,
+      "width_mm": 110.0,
+      "height_mm": 12.0,
+      "font": {
+        "family": "Microsoft YaHei",
+        "size_pt": 14.0,
+        "bold": false,
+        "italic": false
+      },
+      "align": "left",
+      "vertical_align": "middle",
+      "wrap": "none"
+    },
+    {
+      "id": "graduation_date_label",
+      "type": "text",
+      "text": "毕业日期",
+      "x_mm": 60.0,
+      "y_mm": 122.0,
+      "width_mm": 28.0,
+      "height_mm": 12.0,
+      "font": {
+        "family": "Microsoft YaHei",
+        "size_pt": 14.0,
+        "bold": false,
+        "italic": false
+      },
+      "align": "right",
+      "vertical_align": "middle",
+      "wrap": "none"
+    },
+    {
+      "id": "graduation_date_value",
+      "type": "text",
+      "field": "graduation_date",
+      "x_mm": 92.0,
+      "y_mm": 122.0,
+      "width_mm": 110.0,
+      "height_mm": 12.0,
+      "font": {
+        "family": "Microsoft YaHei",
+        "size_pt": 14.0,
+        "bold": false,
+        "italic": false
+      },
+      "align": "left",
+      "vertical_align": "middle",
+      "wrap": "none"
+    },
+    {
+      "id": "photo",
+      "type": "photo",
+      "x_mm": 212.0,
+      "y_mm": 58.0,
+      "width_mm": 36.0,
+      "height_mm": 48.0,
+      "fit": "contain"
+    }
+  ]
+}
