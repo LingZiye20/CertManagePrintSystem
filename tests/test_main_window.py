@@ -101,3 +101,44 @@ def test_print_menu_is_wired(qapp: QApplication, tmp_path) -> None:
 
     window.close()
     settings.sync()
+
+
+def test_verify_menu_is_wired(
+    qapp: QApplication, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtGui import QAction
+
+    from app.bootstrap import bootstrap
+    from app.config.paths import AppPaths
+    from app.ui import student_page as student_page_module
+
+    paths = AppPaths.for_program(tmp_path)
+    context = bootstrap(paths)
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    window = MainWindow(settings=settings, context=context)
+    window.show()
+    qapp.processEvents()
+
+    assert window.verification_service is not None
+    assert window.student_page is not None
+    assert window.student_page.verification_service is window.verification_service
+
+    opened: list[str] = []
+
+    class _FakeDialog:
+        def __init__(self, service, filters, parent=None, *, order_by, descending):
+            opened.append(order_by)
+
+        def exec(self) -> int:
+            return 0
+
+    monkeypatch.setattr(student_page_module, "VerificationDialog", _FakeDialog)
+
+    actions = {action.text(): action for action in window.findChildren(QAction)}
+    assert "核验证书(&V)…" in actions
+    actions["核验证书(&V)…"].trigger()
+
+    assert opened == ["student_no"]
+
+    window.close()
+    settings.sync()

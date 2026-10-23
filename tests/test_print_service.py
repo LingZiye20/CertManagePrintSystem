@@ -365,6 +365,66 @@ def test_cancel_between_records_leaves_not_started(
     assert target.begin_count == 1
     assert result.not_started_count == 2
     assert service.print_records.count_records() == 1
+    # 取消数量只统计因用户中止而未被开始的记录，且如实写入批次摘要。
+    batch_log = service.logs.get(result.batch_log_id)
+    assert batch_log is not None
+    assert "用户中止 2" in batch_log["summary"]
+    assert "用户中止 2 张未开始" in result.message
+
+
+def test_cancel_without_skipped_records_reports_zero(
+    service: PrintService, qapp: QApplication
+) -> None:
+    target = FakePrintTarget()
+
+    result = service.print_batch(
+        [_record(1)],
+        _text_template(),
+        "graduation",
+        target,
+        should_cancel=lambda: False,
+    )
+
+    assert result.cancelled_by_user is False
+    assert "用户中止" not in result.message
+    batch_log = service.logs.get(result.batch_log_id)
+    assert batch_log is not None
+    assert "用户中止 0" in batch_log["summary"]
+
+
+def test_begin_exception_fails_record_and_stops_batch(
+    service: PrintService, qapp: QApplication
+) -> None:
+    records = [_record(1), _record(2), _record(3)]
+    target = FakePrintTarget(begin_error="驱动拒绝打开设备")
+
+    result = service.print_batch(records, _text_template(), "graduation", target)
+
+    assert len(result.attempts) == 1
+    attempt = result.attempts[0]
+    assert attempt.rendered is False
+    assert attempt.result == PRINT_FAILED
+    assert "无法初始化打印设备" in (attempt.error or "")
+    assert attempt.audit_saved is True
+    assert attempt.audit_id is not None
+    assert result.failed_count == 1
+    assert result.not_started_count == 2
+    assert [record_id for record_id, _ in result.not_started] == [2, 3]
+    assert target.begin_count == 1
+    assert target.end_count == 0
+    assert service.print_records.count_records() == 1
+
+    row = service.print_records.get(attempt.audit_id)
+    assert row is not None
+    assert row["result"] == PRINT_FAILED
+    assert "驱动拒绝打开设备" in (row["error_message"] or "")
+
+    assert result.batch_log_saved is True
+    batch_log = service.logs.get(result.batch_log_id)
+    assert batch_log is not None
+    assert batch_log["result"] == "failure"
+    assert "失败 1" in batch_log["summary"]
+    assert "未开始 2" in batch_log["summary"]
 
 
 def test_invalid_device_on_start_marks_all_failed(

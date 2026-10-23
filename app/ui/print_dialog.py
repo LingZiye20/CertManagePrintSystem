@@ -15,9 +15,10 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from PySide6.QtCore import QMarginsF, QSizeF, Qt
-from PySide6.QtGui import QPageLayout, QPageSize
+from PySide6.QtGui import QCloseEvent, QPageLayout, QPageSize
 from PySide6.QtPrintSupport import QPrintDialog, QPrinter
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -64,6 +65,8 @@ class PrintDialog(QDialog):
         self._template_id: int | None = None
         self._preflight: PrintPreflight | None = None
         self.result: PrintBatchResult | None = None
+        self._printing = False
+        self._cancel_requested = False
 
         self.setWindowTitle("打印证书")
         self.resize(640, 520)
@@ -115,6 +118,12 @@ class PrintDialog(QDialog):
         layout.addWidget(warnings_box)
 
         buttons = QHBoxLayout()
+        self.cancel_button = QPushButton("中止剩余", self)
+        self.cancel_button.setToolTip(
+            "在当前这张打印完成后停止剩余记录；不会中断正在渲染的这张"
+        )
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self.cancel_remaining)
         self.print_button = QPushButton("开始打印", self)
         self.print_button.setEnabled(False)
         self.print_button.clicked.connect(self.start_printing)
@@ -122,6 +131,7 @@ class PrintDialog(QDialog):
         self.close_button.clicked.connect(self.reject)
         buttons.addStretch(1)
         buttons.addWidget(self.print_button)
+        buttons.addWidget(self.cancel_button)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
 
@@ -211,25 +221,51 @@ class PrintDialog(QDialog):
             self.warnings_label.setText(str(exc))
             return False
 
-        target = self.target_factory(template)
+        try:
+            target = self.target_factory(template)
+        except Exception as exc:  # noqa: BLE001 - 设备对话框或驱动异常
+            logger.exception("打开打印设备失败")
+            self._reset_target()
+            self._show_printer_error(
+                f"无法打开打印设备：{exc}。请检查打印机连接与驱动后重试。"
+            )
+            return False
         if target is None:
             self._reset_target()
             self.status_label.setText("已取消打印设置，未提交任何打印任务")
             self.warnings_label.clear()
             return False
 
+        try:
+            printer_name = target.name()
+            resolution = target.resolution()
+            geometry = target.page_geometry()
+        except Exception as exc:  # noqa: BLE001 - 几何读取失败按阻塞处理
+            logger.exception("读取打印设备信息失败")
+            self._reset_target()
+            self._show_printer_error(
+                f"无法读取打印设备信息：{exc}。请检查打印机电源、连接与驱动后重试。"
+            )
+            return False
+
         self._target = target
         self._template = template
         self._template_id = option.id
-        geometry = target.page_geometry()
         self.printer_label.setText(
-            f"打印机：{target.name()}（{target.resolution()} dpi，纸张 "
+            f"打印机：{printer_name}（{resolution} dpi，纸张 "
             f"{geometry.paper_width_mm:g}×{geometry.paper_height_mm:g}mm）"
         )
 
-        preflight = self.service.preflight(
-            self.records, template, self.current_type(), target
-        )
+        try:
+            preflight = self.service.preflight(
+                self.records, template, self.current_type(), target
+            )
+        except Exception as exc:  # noqa: BLE001 - 预检异常按阻塞处理
+            logger.exception("打印预检失败")
+            self._reset_target()
+            self._show_printer_error(f"打印预检失败：{exc}。未提交任何打印任务。")
+            return False
+
         self._preflight = preflight
         lines = [*preflight.blocking_errors, *preflight.warnings]
         self.warnings_label.setText("\n".join(lines))
@@ -242,9 +278,19 @@ class PrintDialog(QDialog):
         )
         return preflight.can_print
 
+    def _show_printer_error(self, message: str) -> None:
+        """设备相关异常统一以可读提示展示，并确保打印按钮不可用。"""
+        self.printer_label.setText("打印机：读取失败")
+        self.status_label.setText(message)
+        self.warnings_label.setText(message)
+        self.warnings_label.setStyleSheet("color: #b00020;")
+        self.print_button.setEnabled(False)
+
     # ------------------------------------------------------------------ 打印
 
     def start_printing(self) -> PrintBatchResult | None:
+        if self._printing:
+            return None
         if self._target is None or self._template is None:
             self.status_label.setText("请先完成打印设置")
             return None
@@ -252,8 +298,16 @@ class PrintDialog(QDialog):
             self.status_label.setText("存在阻塞问题，无法开始打印")
             return None
 
+        self._printing = True
+        self._cancel_requested = False
         self.print_button.setEnabled(False)
-        self.status_label.setText("正在逐张提交打印任务…")
+        self.settings_button.setEnabled(False)
+        self.close_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.status_label.setText(
+            "正在逐张提交打印任务…（点击「中止剩余」会在当前这张完成后停止，"
+            "不会中断正在渲染的这张）"
+        )
         try:
             result = self.service.print_batch(
                 self.records,
@@ -261,6 +315,7 @@ class PrintDialog(QDialog):
                 self.current_type(),
                 self._target,
                 template_id=self._template_id,
+                should_cancel=self._should_cancel,
             )
         except PrintError as exc:
             self.status_label.setText(str(exc))
@@ -271,6 +326,11 @@ class PrintDialog(QDialog):
             self.status_label.setText("打印任务发生未预期错误，请查看日志后重试。")
             self.print_button.setEnabled(True)
             return None
+        finally:
+            self._printing = False
+            self.settings_button.setEnabled(True)
+            self.close_button.setEnabled(True)
+            self.cancel_button.setEnabled(False)
 
         self.result = result
         lines = [result.message]
@@ -284,6 +344,32 @@ class PrintDialog(QDialog):
         )
         self.status_label.setText("打印任务已结束（提交状态见上方说明）")
         return result
+
+    def cancel_remaining(self) -> None:
+        """请求停止剩余记录；正在渲染的单张任务不会被中断。"""
+        if not self._printing:
+            return
+        self._cancel_requested = True
+        self.cancel_button.setEnabled(False)
+        self.status_label.setText(
+            "已请求中止：当前这张完成后停止剩余记录，不会中断正在渲染的这张"
+        )
+
+    def _should_cancel(self) -> bool:
+        """逐张任务之间的取消检查，并在检查时处理界面事件。"""
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+        return self._cancel_requested
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt 命名
+        if self._printing:
+            event.ignore()
+            self.status_label.setText(
+                "正在打印，请先点击「中止剩余」或等待本批次结束后再关闭窗口"
+            )
+            return
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------ 设备
 

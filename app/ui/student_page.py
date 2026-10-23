@@ -38,12 +38,14 @@ from app.services import (
     PrintService,
     ServiceError,
     StudentPage as StudentPageResult,
+    VerificationService,
 )
 from app.services import StudentQuery, StudentService
 from app.ui.import_result_dialog import ImportResultDialog
 from app.ui.numbering_dialog import NumberingDialog
 from app.ui.print_dialog import PrintDialog
 from app.ui.student_dialog import StudentDialog
+from app.ui.verification_dialog import VerificationDialog
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +204,7 @@ class StudentPage(QWidget):
         photo_service: PhotoService | None = None,
         import_service: ExcelImportService | None = None,
         print_service: PrintService | None = None,
+        verification_service: VerificationService | None = None,
     ) -> None:
         super().__init__(parent)
         self.service = service
@@ -209,6 +212,7 @@ class StudentPage(QWidget):
         self.photo_service = photo_service
         self.import_service = import_service
         self.print_service = print_service
+        self.verification_service = verification_service
         self.model = StudentTableModel(self)
         self._page = 1
         self._page_count = 1
@@ -301,6 +305,8 @@ class StudentPage(QWidget):
         self.import_button.clicked.connect(self.import_excel)
         self.print_button = QPushButton("打印证书")
         self.print_button.clicked.connect(self.print_selected)
+        self.verify_button = QPushButton("核验证书")
+        self.verify_button.clicked.connect(self.verify_certificates)
         self.refresh_button = QPushButton("刷新")
         self.refresh_button.clicked.connect(lambda: self.reload())
 
@@ -310,6 +316,7 @@ class StudentPage(QWidget):
         row.addWidget(self.generate_number_button)
         row.addWidget(self.import_button)
         row.addWidget(self.print_button)
+        row.addWidget(self.verify_button)
         row.addWidget(self.refresh_button)
         row.addStretch(1)
 
@@ -626,6 +633,25 @@ class StudentPage(QWidget):
         dialog.exec()
         if dialog.result is not None:
             self.message_label.setText(dialog.result.message)
+
+    def create_verification_dialog(self) -> VerificationDialog | None:
+        """按当前筛选与排序创建核验窗口；集合在创建瞬间固定。"""
+        if self.verification_service is None:
+            self._show_info("当前未启用核验功能")
+            return None
+        return VerificationDialog(
+            self.verification_service,
+            self.filters(),
+            self,
+            order_by=self._order_by,
+            descending=self._descending,
+        )
+
+    def verify_certificates(self) -> None:
+        """打开只读核验窗口（不修改任何业务数据）。"""
+        dialog = self.create_verification_dialog()
+        if dialog is not None:
+            dialog.exec()
 
     def import_excel(self) -> ImportResult | None:
         """选择固定 37 列 Excel 文件并展示导入结果。"""

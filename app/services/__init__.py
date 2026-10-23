@@ -75,6 +75,16 @@ from app.services.template_service import (
     TemplateService,
     TemplateSummary,
 )
+from app.services.verification_service import (
+    STATUS_LABELS,
+    VERIFICATION_MISSING_NUMBER,
+    VERIFICATION_MISSING_RECORD,
+    VERIFICATION_READ_FAILED,
+    VERIFICATION_READY,
+    VerificationEntry,
+    VerificationService,
+    VerificationSession,
+)
 
 __all__ = [
     "AuditWriteError",
@@ -124,6 +134,7 @@ __all__ = [
     "RenderWarning",
     "SeedResult",
     "ServiceError",
+    "STATUS_LABELS",
     "StudentPage",
     "StudentQuery",
     "StudentService",
@@ -137,6 +148,13 @@ __all__ = [
     "TemplateValidationError",
     "TextElement",
     "ValidationError",
+    "VERIFICATION_MISSING_NUMBER",
+    "VERIFICATION_MISSING_RECORD",
+    "VERIFICATION_READ_FAILED",
+    "VERIFICATION_READY",
+    "VerificationEntry",
+    "VerificationService",
+    "VerificationSession",
     "compose_certificate_number",
     "template_from_json",
     "template_to_json",

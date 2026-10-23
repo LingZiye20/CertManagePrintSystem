@@ -263,6 +263,59 @@ def test_empty_records_block_printing(
     dialog.close()
 
 
+def test_configure_printer_geometry_error_is_reported(
+    service: PrintService,
+    records: list[dict],
+    template_id: int,
+    qapp: QApplication,
+) -> None:
+    target = FakePrintTarget(geometry_error="驱动返回无效纸张尺寸")
+    dialog = _dialog(service, records, target)
+
+    assert dialog.configure_printer() is False
+
+    assert dialog.print_button.isEnabled() is False
+    assert "无法读取打印设备信息" in dialog.status_label.text()
+    assert "驱动返回无效纸张尺寸" in dialog.status_label.text()
+    assert dialog.start_printing() is None
+    assert service.print_records.count_records() == 0
+    dialog.close()
+
+
+def test_cancel_remaining_stops_between_records(
+    service: PrintService,
+    records: list[dict],
+    template_id: int,
+    fake_target: FakePrintTarget,
+    qapp: QApplication,
+) -> None:
+    dialog = _dialog(service, records, fake_target)
+    assert dialog.configure_printer() is True
+
+    original_begin = fake_target.begin
+    state = {"count": 0}
+
+    def _begin() -> object:
+        state["count"] += 1
+        if state["count"] == 2:
+            # 模拟用户在第二张打印期间点击「中止剩余」。
+            dialog.cancel_remaining()
+        return original_begin()
+
+    fake_target.begin = _begin  # type: ignore[method-assign]
+
+    result = dialog.start_printing()
+
+    assert result is not None
+    assert result.cancelled_by_user is True
+    assert len(result.attempts) == 2
+    assert result.not_started_count == 1
+    assert "用户中止" in result.message
+    assert service.print_records.count_records() == 2
+    assert dialog.cancel_button.isEnabled() is False
+    dialog.close()
+
+
 def test_close_without_printing_writes_nothing(
     service: PrintService,
     records: list[dict],

@@ -28,6 +28,8 @@ class FakePrintTarget:
         acceptance: bool | None = None,
         state: str = STATE_IDLE,
         fail_begin: bool = False,
+        begin_error: str | None = None,
+        geometry_error: str | None = None,
     ) -> None:
         self._dpi = dpi
         self._paper = paper_mm
@@ -36,6 +38,8 @@ class FakePrintTarget:
         self._acceptance = acceptance
         self._state = state
         self.fail_begin = fail_begin
+        self.begin_error = begin_error
+        self.geometry_error = geometry_error
         self.end_error: str | None = None
         self.images: list[QImage] = []
         self.painters: list[QPainter] = []
@@ -53,6 +57,8 @@ class FakePrintTarget:
         return self._dpi
 
     def page_geometry(self) -> PageGeometry:
+        if self.geometry_error is not None:
+            raise RuntimeError(self.geometry_error)
         width, height = self._paper
         if self._printable is None:
             return PageGeometry(
@@ -82,6 +88,8 @@ class FakePrintTarget:
 
     def begin(self) -> QPainter | None:
         self.begin_count += 1
+        if self.begin_error is not None:
+            raise RuntimeError(self.begin_error)
         if self.fail_begin:
             return None
         width = max(1, round(self._paper[0] / 25.4 * self._dpi))

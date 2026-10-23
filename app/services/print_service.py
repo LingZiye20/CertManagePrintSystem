@@ -412,6 +412,7 @@ class PrintService:
         attempts: list[PrintAttempt] = []
         not_started: list[tuple[int, str]] = []
         cancelled_by_user = False
+        cancelled_count = 0
         warnings: list[str] = []
 
         if not preflight.can_print:
@@ -427,6 +428,7 @@ class PrintService:
 
                 if should_cancel is not None and should_cancel():
                     cancelled_by_user = True
+                    cancelled_count += 1
                     not_started.append((record_id, student_no))
                     continue
                 if device_dead:
@@ -454,7 +456,7 @@ class PrintService:
             "accepted": sum(1 for attempt in attempts if attempt.result == PRINT_ACCEPTED),
             "not_started": len(not_started),
             "audit_failed": sum(1 for attempt in attempts if not attempt.audit_saved),
-            "cancelled": 0,
+            "cancelled": cancelled_count,
         }
         saved_ids = [
             attempt.audit_id
@@ -533,9 +535,17 @@ class PrintService:
         render_warnings: tuple[str, ...] = ()
         device_fault = False
 
-        painter = target.begin()
+        try:
+            painter = target.begin()
+        except Exception as exc:  # noqa: BLE001 - 设备初始化异常按单条失败处理
+            logger.exception("初始化打印设备失败（记录 %s）", record_id)
+            painter = None
+            error = f"无法初始化打印设备：{exc}"
+            device_fault = True
+
         if painter is None:
-            error = "无法初始化打印设备"
+            if error is None:
+                error = "无法初始化打印设备"
             device_fault = True
         else:
             try:
@@ -692,7 +702,7 @@ class PrintService:
             f"{_format_mm(template.canvas_height_mm)}mm｜打印机：{printer_name}｜"
             f"渲染完成 {counts['rendered']}｜失败 {counts['failed']}｜"
             f"结果未知 {counts['unknown']}｜已接受 {counts['accepted']}｜"
-            f"中止 {counts['cancelled']}｜未开始 {counts['not_started']}｜"
+            f"用户中止 {counts['cancelled']}｜未开始 {counts['not_started']}｜"
             f"审计失败 {counts['audit_failed']}｜提交状态：{submission}"
         )
         if preflight.blocking_errors:
@@ -775,8 +785,8 @@ class PrintService:
         ]
         if counts["accepted"]:
             parts.append(f"驱动已接受 {counts['accepted']} 张（不代表纸张已输出）")
-        if cancelled_by_user:
-            parts.append("用户已中止")
+        if cancelled_by_user and counts["cancelled"]:
+            parts.append(f"用户中止 {counts['cancelled']} 张未开始")
         if not (counts["accepted"] and not counts["unknown"] and not counts["failed"]):
             parts.append("提交状态无法确认，请检查打印机队列")
         if counts["audit_failed"]:
