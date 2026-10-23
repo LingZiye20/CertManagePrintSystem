@@ -69,20 +69,33 @@ def test_normalize_text_field_rejects_non_text() -> None:
         StudentService.normalize_text_field("student_no", 123)
 
 
-def test_validate_date_field_enforces_iso_dates() -> None:
-    StudentService.validate_date_field("birth_date", None)
-    StudentService.validate_date_field("birth_date", "2024-02-29")
+@pytest.mark.parametrize(
+    "birth_date", ["20260809", "2026.8.9", "2024/01/01", "2024-2-1", "2024-02-30", "abc"]
+)
+def test_arbitrary_date_text_accepted_and_stored_verbatim(
+    student_service: StudentService, birth_date: str
+) -> None:
+    record_id = student_service.create_record(
+        {"student_no": "S-1", "birth_date": birth_date}
+    )
+    assert student_service.records.get(record_id)["birth_date"] == birth_date
 
-    with pytest.raises(ValidationError):
-        StudentService.validate_date_field("birth_date", "2024-02-30")
-    with pytest.raises(ValidationError):
-        StudentService.validate_date_field("birth_date", "2024/02/29")
+
+def test_update_accepts_arbitrary_date_text_verbatim(
+    student_service: StudentService,
+) -> None:
+    record_id = student_service.create_record(
+        {"student_no": "S-1", "enrollment_date": "2024-09-01"}
+    )
+
+    student_service.update_record(record_id, {"graduation_date": "20260809"})
+
+    assert student_service.records.get(record_id)["graduation_date"] == "20260809"
 
 
-@pytest.mark.parametrize("birth_date", ["2024/01/01", "2024-2-1", "2023-02-29", "abc"])
-def test_invalid_date_rejected(student_service: StudentService, birth_date: str) -> None:
+def test_non_text_date_still_rejected(student_service: StudentService) -> None:
     with pytest.raises(ValidationError):
-        student_service.create_record({"student_no": "S-1", "birth_date": birth_date})
+        student_service.create_record({"student_no": "S-1", "birth_date": 20260809})
 
 
 def test_valid_and_empty_dates(student_service: StudentService) -> None:

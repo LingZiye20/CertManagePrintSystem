@@ -12,11 +12,9 @@
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date
 from math import ceil
 from typing import Any
 
@@ -36,8 +34,8 @@ from app.services.errors import (
 logger = logging.getLogger(__name__)
 
 TARGET_TYPE = "certificate_record"
+# 日期字段只按文本原样保存，不做格式强制；清单仍供 Excel 导入识别原生日期单元格。
 DATE_FIELDS: tuple[str, ...] = ("birth_date", "enrollment_date", "graduation_date")
-DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DEFAULT_PAGE_SIZE = 20
 ALLOWED_PAGE_SIZES: tuple[int, ...] = (20, 50, 100)
 
@@ -340,18 +338,6 @@ class StudentService:
         return raw.strip() or None
 
     @staticmethod
-    def validate_date_field(name: str, text: str | None) -> None:
-        """校验单个日期字段必须为有效的 ``YYYY-MM-DD`` 文本。"""
-        if text is None:
-            return
-        if not DATE_PATTERN.match(text):
-            raise ValidationError(f"{name} 必须为 YYYY-MM-DD 格式")
-        try:
-            date.fromisoformat(text)
-        except ValueError as exc:
-            raise ValidationError(f"{name} 不是有效日期") from exc
-
-    @staticmethod
     def _normalize_values(
         values: Mapping[str, Any],
         *,
@@ -374,9 +360,6 @@ class StudentService:
                 raise ValidationError("学号不能为空")
         elif "student_no" in normalized and not normalized["student_no"]:
             raise ValidationError("学号不能为空")
-
-        for name in DATE_FIELDS:
-            StudentService.validate_date_field(name, normalized.get(name))
 
         return normalized
 

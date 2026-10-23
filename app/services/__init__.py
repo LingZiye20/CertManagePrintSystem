@@ -32,6 +32,7 @@ from app.services.errors import (
     ValidationError,
 )
 from app.services.audit_service import AuditEntry, AuditService
+from app.services.excel_export_service import ExcelExportService, ExportResult
 from app.services.excel_import_service import (
     ExcelImportService,
     ImportIssue,
@@ -73,8 +74,11 @@ from app.services.print_target import PageGeometry, PrintTarget, QtPrintTarget
 from app.services.reset_service import ResetResult, ResetScope, ResetService
 from app.services.settings_service import (
     DEFAULT_CERTIFICATE_TYPE_KEY,
+    DEFAULT_TABLE_COLUMN_KEYS,
     PAGE_SIZE_KEY,
     SETTING_DEFINITIONS,
+    STUDENT_TABLE_FIELDS,
+    TABLE_COLUMNS_KEY,
     SettingsService,
     SettingsSnapshot,
 )
@@ -119,11 +123,14 @@ __all__ = [
     "CertificateTemplate",
     "CertificateType",
     "DEFAULT_CERTIFICATE_TYPE_KEY",
+    "DEFAULT_TABLE_COLUMN_KEYS",
     "DataAccessError",
     "DeleteBlockedError",
     "DuplicateStudentNoError",
     "DuplicateValueError",
+    "ExcelExportService",
     "ExcelImportService",
+    "ExportResult",
     "FontSpec",
     "GeneratedNumber",
     "ImportIssue",
@@ -179,9 +186,11 @@ __all__ = [
     "SettingsSnapshot",
     "SettingsValidationError",
     "STATUS_LABELS",
+    "STUDENT_TABLE_FIELDS",
     "StudentPage",
     "StudentQuery",
     "StudentService",
+    "TABLE_COLUMNS_KEY",
     "TemplateDataError",
     "TemplateError",
     "TemplateNotFoundError",

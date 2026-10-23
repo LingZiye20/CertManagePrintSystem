@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QMessageBox
 
 from app.data.db import Database
 from app.services import (
     DEFAULT_CERTIFICATE_TYPE_KEY,
+    DEFAULT_TABLE_COLUMN_KEYS,
     PAGE_SIZE_KEY,
+    STUDENT_TABLE_FIELDS,
+    TABLE_COLUMNS_KEY,
     ServiceError,
     SettingsService,
     SettingsValidationError,
 )
 from app.ui.settings_dialog import SettingsDialog
+
+DEFAULT_COLUMN_KEYS: tuple[str, ...] = DEFAULT_TABLE_COLUMN_KEYS
+POOL_KEYS: tuple[str, ...] = tuple(key for key, _label in STUDENT_TABLE_FIELDS)
 
 
 @pytest.fixture
@@ -178,3 +185,150 @@ def test_widgets_only_offer_allowed_values(qapp: QApplication, service: Settings
     assert page_sizes == {20, 50, 100}
     assert types == {"graduation", "degree", "other"}
     assert dialog.findChildren(QComboBox)
+
+
+# ---------------------------------------------------------------- 表格展示字段
+
+
+def test_columns_list_lists_full_pool_with_default_checked(
+    qapp: QApplication, service: SettingsService
+) -> None:
+    dialog = SettingsDialog(service)
+
+    keys = tuple(
+        dialog.columns_list.item(row).data(Qt.ItemDataRole.UserRole)
+        for row in range(dialog.columns_list.count())
+    )
+    labels = [
+        dialog.columns_list.item(row).text()
+        for row in range(dialog.columns_list.count())
+    ]
+    assert keys == POOL_KEYS
+    assert len(keys) == 38
+    assert labels == [label for _key, label in STUDENT_TABLE_FIELDS]
+    assert dialog.selected_columns() == DEFAULT_COLUMN_KEYS
+    checked = {
+        dialog.columns_list.item(row).data(Qt.ItemDataRole.UserRole)
+        for row in range(dialog.columns_list.count())
+        if dialog.columns_list.item(row).checkState() == Qt.CheckState.Checked
+    }
+    assert checked == set(DEFAULT_COLUMN_KEYS)
+
+
+def test_dialog_loads_stored_column_subset_and_order(
+    qapp: QApplication, service: SettingsService
+) -> None:
+    service.update({TABLE_COLUMNS_KEY: ("updated_at", "name")})
+
+    dialog = SettingsDialog(service)
+
+    assert dialog.selected_columns() == ("updated_at", "name")
+
+
+def test_uncheck_and_move_then_save_persists(
+    qapp: QApplication, service: SettingsService, repository_database: Database
+) -> None:
+    dialog = SettingsDialog(service)
+    dialog.show()
+
+    dialog.columns_list.item(2).setCheckState(Qt.CheckState.Unchecked)  # 性别
+    dialog.columns_list.setCurrentRow(1)  # 姓名
+    dialog.move_up_button.click()
+
+    expected = (
+        "name",
+        "student_no",
+        "faculty_name",
+        "major_name",
+        "class_name",
+        "certificate_no",
+        "degree_certificate_no",
+        "other_certificate_no",
+        "updated_at",
+    )
+    assert dialog.selected_columns() == expected
+    assert dialog.save_settings() is True
+
+    assert (
+        SettingsService(repository_database).load().values[TABLE_COLUMNS_KEY]
+        == expected
+    )
+    assert "已保存" in dialog.detail_label.text()
+    dialog.close()
+
+
+def test_save_blocked_when_no_columns_selected(
+    qapp: QApplication, service: SettingsService, repository_database: Database
+) -> None:
+    dialog = SettingsDialog(service)
+    dialog.show()
+    for row in range(dialog.columns_list.count()):
+        dialog.columns_list.item(row).setCheckState(Qt.CheckState.Unchecked)
+
+    assert dialog.save_settings() is False
+    assert dialog.isVisible() is True
+    assert "至少" in dialog.detail_label.text()
+    assert (
+        SettingsService(repository_database).load().values[TABLE_COLUMNS_KEY]
+        == DEFAULT_COLUMN_KEYS
+    )
+    dialog.close()
+
+
+def test_restore_defaults_restores_all_columns(
+    qapp: QApplication,
+    service: SettingsService,
+    repository_database: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.update({TABLE_COLUMNS_KEY: ("name",)})
+    dialog = SettingsDialog(service)
+    assert dialog.selected_columns() == ("name",)
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    assert dialog.restore_defaults() is True
+    assert dialog.selected_columns() == DEFAULT_COLUMN_KEYS
+    assert (
+        SettingsService(repository_database).load().values[TABLE_COLUMNS_KEY]
+        == DEFAULT_COLUMN_KEYS
+    )
+
+
+def test_select_all_then_save_stores_full_pool(
+    qapp: QApplication, service: SettingsService, repository_database: Database
+) -> None:
+    dialog = SettingsDialog(service)
+    dialog.show()
+
+    dialog.select_all_columns_button.click()
+
+    assert dialog.selected_columns() == POOL_KEYS
+    assert dialog.save_settings() is True
+    assert (
+        SettingsService(repository_database).load().values[TABLE_COLUMNS_KEY]
+        == POOL_KEYS
+    )
+    dialog.close()
+
+
+def test_clear_all_then_save_is_blocked(
+    qapp: QApplication, service: SettingsService, repository_database: Database
+) -> None:
+    dialog = SettingsDialog(service)
+    dialog.show()
+
+    dialog.clear_all_columns_button.click()
+
+    assert dialog.selected_columns() == ()
+    assert dialog.save_settings() is False
+    assert "至少" in dialog.detail_label.text()
+    assert (
+        SettingsService(repository_database).load().values[TABLE_COLUMNS_KEY]
+        == DEFAULT_COLUMN_KEYS
+    )
+    dialog.close()

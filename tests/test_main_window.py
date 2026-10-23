@@ -265,6 +265,48 @@ def test_menu_bar_order_starts_with_system_and_has_no_file_menu(
     window.close()
 
 
+def test_data_menu_order_has_template_import_export_refresh(
+    qapp: QApplication, tmp_path
+) -> None:
+    from PySide6.QtGui import QKeySequence
+    from PySide6.QtWidgets import QMenu
+
+    window, _context = _build_window(tmp_path, qapp)
+
+    data_menu = next(
+        menu for menu in window.findChildren(QMenu) if menu.title() == "数据管理(&D)"
+    )
+    action_texts = [
+        action.text()
+        for action in data_menu.actions()
+        if not action.isSeparator()
+    ]
+    assert action_texts == [
+        "下载导入模板(&T)…",
+        "导入 Excel(&I)",
+        "导出数据(&E)…",
+        "刷新(&R)",
+    ]
+
+    # 编辑/删除菜单项已从数据管理菜单移除
+    assert "编辑记录(&E)" not in action_texts
+    assert "删除记录(&D)" not in action_texts
+
+    # 刷新仍保留 F5 快捷键
+    refresh = next(a for a in data_menu.actions() if a.text() == "刷新(&R)")
+    assert refresh.shortcut() == QKeySequence("F5")
+
+    # 工具栏编辑/删除按钮及其功能不受影响
+    page = window.student_page
+    assert page is not None
+    assert hasattr(page, "edit_button")
+    assert hasattr(page, "delete_button")
+    assert hasattr(page, "edit_selected")
+    assert hasattr(page, "delete_selected")
+
+    window.close()
+
+
 def test_photo_menu_is_absent_without_photo_service(qapp: QApplication, tmp_path) -> None:
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     window = MainWindow(settings=settings)

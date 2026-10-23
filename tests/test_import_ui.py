@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QPushButton
 
 from app.bootstrap import bootstrap
@@ -65,6 +65,8 @@ def test_import_menu_action_is_available(
     actions = {action.text(): action for action in window.findChildren(QAction)}
     assert "导入 Excel(&I)" in actions
     assert actions["导入 Excel(&I)"].isEnabled() is True
+    assert "下载导入模板(&T)…" in actions
+    assert actions["下载导入模板(&T)…"].isEnabled() is True
     assert "新增记录(&A)" not in actions
     assert not hasattr(page, "add_button")
     assert not hasattr(page, "import_button")
@@ -83,11 +85,17 @@ def test_data_menu_order_and_toolbar_without_add_entry(
         menu for menu in window.findChildren(QMenu) if menu.title() == "数据管理(&D)"
     )
     assert [action.text() for action in data_menu.actions()] == [
-        "刷新(&R)",
+        "下载导入模板(&T)…",
         "导入 Excel(&I)",
-        "编辑记录(&E)",
-        "删除记录(&D)",
+        "导出数据(&E)…",
+        "",
+        "刷新(&R)",
     ]
+
+    # 编辑/删除已从数据管理菜单移除
+    action_texts = {a.text() for a in data_menu.actions()}
+    assert "编辑记录(&E)" not in action_texts
+    assert "删除记录(&D)" not in action_texts
 
     page = window.student_page
     assert page is not None
@@ -248,3 +256,91 @@ def test_main_window_injects_import_service(
     assert window.student_page is not None
     assert window.student_page.import_service is not None
     window.close()
+
+
+def test_download_template_writes_header_only_file(
+    page: StudentPage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.ui import student_page as student_page_module
+
+    target = tmp_path / "证书导入模板.xlsx"
+    messages: list[str] = []
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        staticmethod(lambda *args, **kwargs: (str(target), "")),
+    )
+    monkeypatch.setattr(
+        student_page_module.QMessageBox,
+        "information",
+        staticmethod(
+            lambda parent, title, message, *args, **kwargs: messages.append(message)
+        ),
+    )
+
+    page.download_import_template()
+
+    assert target.is_file()
+    assert messages and str(target) in messages[0]
+    assert str(target) in page.message_label.text()
+
+    workbook = load_workbook(target, read_only=True)
+    try:
+        rows = list(workbook.active.iter_rows(values_only=True))
+    finally:
+        workbook.close()
+    assert len(rows) == 1
+    assert tuple(rows[0]) == EXCEL_COLUMN_NAMES
+
+
+def test_download_template_cancel_writes_nothing(
+    page: StudentPage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        staticmethod(lambda *args, **kwargs: ("", "")),
+    )
+
+    page.download_import_template()
+
+    assert list(tmp_path.glob("*.xlsx")) == []
+    assert page.message_label.text() == ""
+
+
+def test_download_template_failure_removes_partial_file(
+    page: StudentPage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.ui import student_page as student_page_module
+
+    target = tmp_path / "broken.xlsx"
+    warnings: list[str] = []
+
+    def _broken(path):
+        Path(path).write_bytes(b"partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(student_page_module, "write_template", _broken)
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        staticmethod(lambda *args, **kwargs: (str(target), "")),
+    )
+    monkeypatch.setattr(
+        student_page_module.QMessageBox,
+        "warning",
+        staticmethod(
+            lambda parent, title, message, *args, **kwargs: warnings.append(message)
+        ),
+    )
+
+    page.download_import_template()
+
+    assert not target.exists()
+    assert warnings and "无法写入" in warnings[0]

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +32,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.services import (
+    ExcelExportService,
     ExcelImportService,
+    ExportResult,
     GeneratedNumber,
     ImportResult,
     NumberingService,
@@ -41,27 +44,52 @@ from app.services import (
     StudentPage as StudentPageResult,
     VerificationService,
 )
-from app.services import StudentQuery, StudentService
+from app.services import (
+    DEFAULT_TABLE_COLUMN_KEYS,
+    STUDENT_TABLE_FIELDS,
+    StudentQuery,
+    StudentService,
+)
 from app.ui.import_result_dialog import ImportResultDialog
 from app.ui.numbering_dialog import NumberingDialog
 from app.ui.print_dialog import PrintDialog
 from app.ui.student_dialog import PHOTO_FILE_FILTER, StudentDialog
 from app.ui.verification_dialog import VerificationDialog
+from app.utils.excel_template import write_template
 
 logger = logging.getLogger(__name__)
 
-TABLE_COLUMNS: tuple[tuple[str, str], ...] = (
-    ("student_no", "学号"),
-    ("name", "姓名"),
-    ("gender", "性别"),
-    ("faculty_name", "学院"),
-    ("major_name", "专业"),
-    ("class_name", "班级"),
-    ("certificate_no", "毕业证书编号"),
-    ("degree_certificate_no", "学位证书编号"),
-    ("other_certificate_no", "其他证书编号"),
-    ("updated_at", "更新时间"),
+# 可配置字段池（38 项）与默认显示列（历史 10 列）分离：
+# 模型与页面的默认值始终是 10 列，只有设置显式保存后才扩展到其他字段。
+_STUDENT_TABLE_LABELS: dict[str, str] = dict(STUDENT_TABLE_FIELDS)
+
+DEFAULT_TABLE_COLUMNS: tuple[tuple[str, str], ...] = tuple(
+    (key, _STUDENT_TABLE_LABELS[key]) for key in DEFAULT_TABLE_COLUMN_KEYS
 )
+
+# 兼容既有引用：页面默认表格仍为 10 列。
+TABLE_COLUMNS: tuple[tuple[str, str], ...] = DEFAULT_TABLE_COLUMNS
+
+
+def normalize_table_columns(
+    columns: Sequence[str | tuple[str, str]],
+) -> tuple[tuple[str, str], ...]:
+    """把字段键序列或（字段, 标签）序列统一为列定义；未知字段直接报错。"""
+    normalized: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for item in columns:
+        key = item if isinstance(item, str) else item[0]
+        if key in seen:
+            continue
+        label = _STUDENT_TABLE_LABELS.get(key)
+        if label is None:
+            raise ValueError(f"不支持的表格字段：{key}")
+        seen.add(key)
+        normalized.append((key, label))
+    if not normalized:
+        raise ValueError("主页表格至少需要保留一个字段")
+    return tuple(normalized)
+
 
 PAGE_SIZE_CHOICES: tuple[int, ...] = (20, 50, 100)
 
@@ -73,8 +101,23 @@ class StudentTableModel(QAbstractTableModel):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._columns: tuple[tuple[str, str], ...] = DEFAULT_TABLE_COLUMNS
         self._rows: list[dict[str, Any]] = []
         self._checked_ids: list[int] = []
+
+    @property
+    def columns(self) -> tuple[tuple[str, str], ...]:
+        """当前激活的列定义（不含固定勾选列）。"""
+        return self._columns
+
+    def set_columns(self, columns: Sequence[tuple[str, str]]) -> None:
+        """替换激活列；空列表视为非法，由调用方保证字段合法。"""
+        normalized = tuple(columns)
+        if not normalized:
+            raise ValueError("主页表格至少需要保留一个字段")
+        self.beginResetModel()
+        self._columns = normalized
+        self.endResetModel()
 
     def set_rows(self, rows: list[dict[str, Any]]) -> None:
         self.beginResetModel()
@@ -94,7 +137,7 @@ class StudentTableModel(QAbstractTableModel):
     def columnCount(self, parent: QModelIndex | None = None) -> int:  # noqa: N802
         if parent is not None and parent.isValid():
             return 0
-        return len(TABLE_COLUMNS) + 1
+        return len(self._columns) + 1
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid():
@@ -110,7 +153,7 @@ class StudentTableModel(QAbstractTableModel):
             return None
         if role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
             return None
-        field = TABLE_COLUMNS[index.column() - 1][0]
+        field = self._columns[index.column() - 1][0]
         value = self._rows[index.row()].get(field)
         return "" if value is None else str(value)
 
@@ -155,7 +198,7 @@ class StudentTableModel(QAbstractTableModel):
         if orientation == Qt.Orientation.Horizontal:
             if section == self.CHECK_COLUMN:
                 return "选择"
-            return TABLE_COLUMNS[section - 1][1]
+            return self._columns[section - 1][1]
         return section + 1
 
     # ------------------------------------------------------------------ 勾选
@@ -204,10 +247,12 @@ class StudentPage(QWidget):
         numbering_service: NumberingService | None = None,
         photo_service: PhotoService | None = None,
         import_service: ExcelImportService | None = None,
+        export_service: ExcelExportService | None = None,
         print_service: PrintService | None = None,
         verification_service: VerificationService | None = None,
         initial_page_size: int = PAGE_SIZE_CHOICES[0],
         default_certificate_type: str = "graduation",
+        initial_table_columns: Sequence[str | tuple[str, str]] = DEFAULT_TABLE_COLUMNS,
     ) -> None:
         super().__init__(parent)
         self.service = service
@@ -215,14 +260,22 @@ class StudentPage(QWidget):
         self.photo_service = photo_service
         self.import_service = import_service
         self.import_action: QAction | None = None
+        self.export_service = export_service
         self.print_service = print_service
         self.verification_service = verification_service
         self.default_certificate_type = default_certificate_type
+        columns = normalize_table_columns(initial_table_columns)
         self.model = StudentTableModel(self)
+        if columns != self.model.columns:
+            self.model.set_columns(columns)
         self._page = 1
         self._page_count = 1
         self._total = 0
-        self._order_by = "student_no"
+        self._order_by = (
+            "student_no"
+            if any(key == "student_no" for key, _label in columns)
+            else columns[0][0]
+        )
         self._descending = False
         self._page_size = (
             initial_page_size
@@ -250,8 +303,8 @@ class StudentPage(QWidget):
         header.setSectionsClickable(True)
         header.setStretchLastSection(True)
         header.setSortIndicatorShown(True)
-        header.setSortIndicator(1, Qt.SortOrder.AscendingOrder)
         header.sectionClicked.connect(self._on_header_clicked)
+        self._sync_sort_indicator()
         self.table.doubleClicked.connect(lambda _index: self.edit_selected())
         self.table.selectionModel().selectionChanged.connect(self._sync_action_buttons)
         self.model.dataChanged.connect(lambda *args: self._sync_checked_label())
@@ -436,20 +489,55 @@ class StudentPage(QWidget):
     def _on_header_clicked(self, column: int) -> None:
         if column == StudentTableModel.CHECK_COLUMN:
             return
-        field = TABLE_COLUMNS[column - 1][0]
+        field = self.model.columns[column - 1][0]
         if field == self._order_by:
             self._descending = not self._descending
         else:
             self._order_by = field
             self._descending = False
+        self._sync_sort_indicator()
+        self._page = 1
+        self._reset_checks("排序已变化，勾选已清空")
+        self.reload()
+
+    def _sort_indicator_position(self) -> int:
+        """返回当前排序字段对应的表头列号；字段已隐藏时返回 -1。"""
+        for position, (field, _label) in enumerate(self.model.columns, start=1):
+            if field == self._order_by:
+                return position
+        return -1
+
+    def _sync_sort_indicator(self) -> None:
+        header = self.table.horizontalHeader()
+        position = self._sort_indicator_position()
+        if position <= 0:
+            header.setSortIndicatorShown(False)
+            return
         order = (
             Qt.SortOrder.DescendingOrder
             if self._descending
             else Qt.SortOrder.AscendingOrder
         )
-        self.table.horizontalHeader().setSortIndicator(column, order)
-        self._page = 1
-        self._reset_checks("排序已变化，勾选已清空")
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(position, order)
+
+    def apply_table_columns(
+        self, columns: Sequence[str | tuple[str, str]]
+    ) -> None:
+        """应用新的主页表格列配置；与当前配置相同时不做任何事。"""
+        normalized = normalize_table_columns(columns)
+        if normalized == self.model.columns:
+            return
+
+        self.model.set_columns(normalized)
+        visible_fields = {field for field, _label in normalized}
+        if self._order_by not in visible_fields:
+            # 排序字段已被隐藏：回退默认排序并清理表头指示器。
+            self._order_by = "student_no"
+            self._descending = False
+            self.table.horizontalHeader().setSortIndicatorShown(False)
+        else:
+            self._sync_sort_indicator()
         self.reload()
 
     def _apply_result(self, result: StudentPageResult) -> None:
@@ -731,6 +819,103 @@ class StudentPage(QWidget):
 
         self._show_import_result(result)
         return result
+
+    def download_import_template(self) -> None:
+        """选择保存位置并生成仅含表头行的固定 37 列导入模板。"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "下载导入模板",
+            "证书导入模板.xlsx",
+            "Excel 工作簿 (*.xlsx)",
+        )
+        if not file_path:
+            return
+
+        target = Path(file_path)
+        if target.suffix.lower() != ".xlsx":
+            target = target.with_suffix(".xlsx")
+        existed_before = target.exists()
+        try:
+            write_template(target)
+        except OSError as exc:
+            logger.warning("生成导入模板失败：%s（%s）", target, exc)
+            self._remove_partial_template(target, existed_before)
+            self._show_error(
+                "下载模板失败",
+                "无法写入模板文件，请检查保存位置与文件权限后重试。",
+            )
+            return
+        except Exception:  # noqa: BLE001 - 界面不得因模板生成异常崩溃
+            logger.exception("生成导入模板时发生未预期错误")
+            self._remove_partial_template(target, existed_before)
+            self._show_error(
+                "下载模板失败", "生成模板时发生未预期错误，请查看日志后重试。"
+            )
+            return
+
+        self.message_label.setText(f"导入模板已保存：{target}")
+        QMessageBox.information(
+            self, "下载导入模板", f"导入模板已保存到：\n{target}"
+        )
+
+    @staticmethod
+    def _remove_partial_template(path: Path, existed_before: bool) -> None:
+        """失败时尽力清理本次新建的模板文件；不删除用户原有文件。"""
+        if existed_before:
+            return
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("清理未完成的模板文件失败：%s", path)
+
+    def export_data(self) -> None:
+        """将当前筛选结果导出为固定 37 列 ``.xlsx`` 文件。"""
+        if self.export_service is None:
+            self._show_info("当前未启用数据导出功能")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出数据",
+            "证书数据导出.xlsx",
+            "Excel 工作簿 (*.xlsx)",
+        )
+        if not file_path:
+            return
+
+        target = Path(file_path)
+        if target.suffix.lower() != ".xlsx":
+            target = target.with_suffix(".xlsx")
+
+        query = StudentQuery(
+            filters=self.filters(),
+            order_by=self._order_by,
+            descending=self._descending,
+            page=self._page,
+            page_size=self._page_size,
+        )
+
+        self.message_label.setText("正在导出…")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = self.export_service.export(query, target)
+        except ServiceError as exc:
+            self._show_error("导出失败", str(exc))
+            return
+        except Exception:  # noqa: BLE001 - 未预期错误记录日志并提示
+            logger.exception("导出数据时发生未预期错误")
+            self._show_error("导出失败", "发生未预期错误，请查看日志后重试。")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self.message_label.setText(f"已导出 {result.record_count} 条记录：{result.path}")
+        QMessageBox.information(
+            self,
+            "导出成功",
+            f"已导出 {result.record_count} 条记录到：\n{result.path}\n\n"
+            "如需重新导入，请先清空三类证书编号列。",
+        )
 
     def _show_import_result(self, result: ImportResult) -> None:
         self.message_label.setText(result.message)

@@ -17,13 +17,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from app.data.db import Database
+from app.data.db import EXCEL_FIELD_NAMES, Database
 from app.repositories import AppSettingsRepository, OperationLogRepository
 from app.services.errors import (
     AuditWriteError,
     DataAccessError,
     SettingsValidationError,
 )
+from app.utils.excel_template import EXCEL_COLUMN_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,45 @@ TARGET_TYPE = "app_setting"
 
 PAGE_SIZE_KEY = "student.page_size"
 DEFAULT_CERTIFICATE_TYPE_KEY = "default.certificate_type"
+TABLE_COLUMNS_KEY = "student.table_columns"
+
+# 既有 10 列：键与中文标签保持原样，标签不随 C.2 Excel 列名变化。
+_BASE_TABLE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("student_no", "学号"),
+    ("name", "姓名"),
+    ("gender", "性别"),
+    ("faculty_name", "学院"),
+    ("major_name", "专业"),
+    ("class_name", "班级"),
+    ("certificate_no", "毕业证书编号"),
+    ("degree_certificate_no", "学位证书编号"),
+    ("other_certificate_no", "其他证书编号"),
+    ("updated_at", "更新时间"),
+)
+
+# 默认显示列（未配置或配置非法时的回退值），保持历史默认顺序。
+DEFAULT_TABLE_COLUMN_KEYS: tuple[str, ...] = tuple(
+    key for key, _label in _BASE_TABLE_FIELDS
+)
+
+_BASE_FIELD_KEYS: frozenset[str] = frozenset(DEFAULT_TABLE_COLUMN_KEYS)
+
+# 可配置字段池 = 既有 10 列 + 其余 28 个 Excel 导入字段（按 Excel 模板列顺序），共 38 项。
+# 表格第一列“选择”勾选列固定存在，不在此列表中。
+STUDENT_TABLE_FIELDS: tuple[tuple[str, str], ...] = (
+    *_BASE_TABLE_FIELDS,
+    *(
+        (field, label)
+        for field, label in zip(EXCEL_FIELD_NAMES, EXCEL_COLUMN_NAMES)
+        if field not in _BASE_FIELD_KEYS
+    ),
+)
+
+TABLE_COLUMN_KEYS: tuple[str, ...] = tuple(field for field, _label in STUDENT_TABLE_FIELDS)
+STUDENT_TABLE_LABELS: dict[str, str] = dict(STUDENT_TABLE_FIELDS)
+
+# 设置项在审计摘要中的展示长度上限，超长时截断并标注剩余项数。
+TABLE_COLUMNS_DISPLAY_LIMIT = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +106,15 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
         value_type="str",
         requires_restart=False,
         description="打印、核验与编号设置窗口打开时的默认证书类型。",
+    ),
+    SettingDefinition(
+        key=TABLE_COLUMNS_KEY,
+        label="主页表格展示字段",
+        default=DEFAULT_TABLE_COLUMN_KEYS,
+        choices=TABLE_COLUMN_KEYS,
+        value_type="table_columns",
+        requires_restart=False,
+        description="勾选主页学生表格显示的字段并调整顺序，保存后立即生效。",
     ),
 )
 
@@ -270,6 +319,8 @@ def _normalize_changes(changes: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _coerce(definition: SettingDefinition, raw: Any) -> Any | None:
+    if definition.value_type == "table_columns":
+        return _coerce_table_columns(definition, raw)
     if definition.value_type == "int":
         if not isinstance(raw, int) or isinstance(raw, bool):
             return None
@@ -279,6 +330,25 @@ def _coerce(definition: SettingDefinition, raw: Any) -> Any | None:
     else:  # pragma: no cover - 定义错误
         return None
     return raw if raw in definition.choices else None
+
+
+def _coerce_table_columns(
+    definition: SettingDefinition, raw: Any
+) -> tuple[str, ...] | None:
+    """校验表格字段序列：非空、无重复、全部为合法字段键。"""
+    if isinstance(raw, (str, bytes)) or isinstance(raw, bool):
+        return None
+    if not isinstance(raw, (tuple, list)):
+        return None
+    if not raw:
+        return None
+    allowed = set(definition.choices)
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str) or item not in allowed or item in seen:
+            return None
+        seen.add(item)
+    return tuple(raw)
 
 
 def _parse_value(definition: SettingDefinition, raw: Any) -> Any | None:
@@ -292,14 +362,43 @@ def _parse_value(definition: SettingDefinition, raw: Any) -> Any | None:
         return value if value in definition.choices else None
     if definition.value_type == "str":
         return raw if raw in definition.choices else None
+    if definition.value_type == "table_columns":
+        if not isinstance(raw, str):
+            return None
+        keys = [part.strip() for part in raw.split(",")]
+        if not keys or any(not key for key in keys):
+            return None
+        allowed = set(definition.choices)
+        if len(set(keys)) != len(keys):
+            return None
+        if any(key not in allowed for key in keys):
+            return None
+        return tuple(keys)
     return None  # pragma: no cover - 定义错误
 
 
 def _to_stored(value: Any) -> str:
+    if isinstance(value, tuple):
+        return ",".join(value)
     return str(value)
 
 
 def _display(definition: SettingDefinition, value: Any) -> str:
     if definition.value_type == "str" and definition.key == DEFAULT_CERTIFICATE_TYPE_KEY:
         return CERTIFICATE_TYPE_LABELS.get(value, str(value))
+    if definition.value_type == "table_columns":
+        keys = (value,) if isinstance(value, str) else tuple(value)
+        labels = [STUDENT_TABLE_LABELS.get(key, str(key)) for key in keys]
+        text = "、".join(labels)
+        if len(text) <= TABLE_COLUMNS_DISPLAY_LIMIT:
+            return text
+        shown: list[str] = []
+        length = 0
+        for label in labels:
+            extra = len(label) + (1 if shown else 0)
+            if length + extra > TABLE_COLUMNS_DISPLAY_LIMIT:
+                break
+            shown.append(label)
+            length += extra
+        return f"{'、'.join(shown)}…等 {len(labels) - len(shown)} 项"
     return str(value)

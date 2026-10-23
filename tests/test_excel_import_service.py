@@ -444,7 +444,7 @@ def test_multiple_rows_report_all_errors(
         [
             _values(student_no=None),
             _values(student_no="00124", certificate_no="X"),
-            _values(student_no="00125", birth_date="2024-02-30"),
+            _values(student_no="00125", study_years=4),
             _values(student_no="00126"),
         ],
     )
@@ -466,7 +466,7 @@ def test_valid_and_invalid_rows_do_not_partially_import(
         tmp_path / "students.xlsx",
         [
             _values(student_no="00123"),
-            _values(student_no="00124", birth_date="2024-02-30"),
+            _values(student_no="00124", study_years=4),
         ],
     )
 
@@ -520,22 +520,19 @@ def test_numeric_text_field_is_not_coerced(
     )
 
 
-@pytest.mark.parametrize("bad_date", ["2024-02-30", "2024/02/29", "2024-2-1"])
-def test_invalid_date_strings_fail(
-    import_service: ExcelImportService, tmp_path: Path, bad_date: str
+@pytest.mark.parametrize("date_text", ["20260809", "2026.8.9", "2024/02/29", "2024-2-1"])
+def test_date_text_is_accepted_and_stored_verbatim(
+    import_service: ExcelImportService, tmp_path: Path, date_text: str
 ) -> None:
     path = _write_rows(
-        tmp_path / "students.xlsx", [_values(birth_date=bad_date)]
+        tmp_path / "students.xlsx", [_values(birth_date=date_text)]
     )
 
     result = import_service.import_file(path)
 
-    assert result.status == "failed"
-    assert _records(import_service) == []
-    assert any(
-        issue.field == "birth_date" and issue.kind == "date"
-        for issue in result.issues
-    )
+    assert result.status == "success"
+    assert result.imported_count == 1
+    assert _records(import_service)[0]["birth_date"] == date_text
 
 
 def test_datetime_with_non_zero_time_fails(
@@ -577,7 +574,7 @@ def test_issue_columns_use_c2_template_names_not_ui_labels(
             _values(
                 college_number=123,
                 education_level=4,
-                enrollment_date="2024/09/01",
+                enrollment_date=45292,
             )
         ],
     )

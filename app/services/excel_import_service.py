@@ -589,17 +589,6 @@ class ExcelImportService:
                     kind="type",
                     reason=f"{column}：{exc}",
                 )
-            if name in DATE_FIELDS and text is not None:
-                try:
-                    StudentService.validate_date_field(name, text)
-                except ValidationError as exc:
-                    return text, ImportIssue(
-                        row=row_number,
-                        column=column,
-                        field=name,
-                        kind="date",
-                        reason=f"{column}：{exc}",
-                    )
             return text, None
 
         if name in DATE_FIELDS and isinstance(raw, datetime):

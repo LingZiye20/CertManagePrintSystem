@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QSettings, Qt, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QWidget
@@ -14,8 +16,11 @@ from app import __version__
 from app.bootstrap import AppContext
 from app.services import (
     DEFAULT_CERTIFICATE_TYPE_KEY,
+    DEFAULT_TABLE_COLUMN_KEYS,
     PAGE_SIZE_KEY,
+    TABLE_COLUMNS_KEY,
     AuditService,
+    ExcelExportService,
     ExcelImportService,
     NumberingService,
     PhotoImportService,
@@ -23,6 +28,7 @@ from app.services import (
     PhotoStorageError,
     PrintService,
     ResetService,
+    ServiceError,
     SettingsService,
     StudentService,
     TemplateService,
@@ -40,6 +46,8 @@ WINDOW_TITLE = "证书管理与打印系统"
 DEFAULT_WIDTH = 1024
 DEFAULT_HEIGHT = 700
 GEOMETRY_KEY = "ui/main_window/geometry"
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -60,6 +68,7 @@ class MainWindow(QMainWindow):
         self.photo_service: PhotoService | None = None
         self.photo_import_service: PhotoImportService | None = None
         self.import_service: ExcelImportService | None = None
+        self.export_service: ExcelExportService | None = None
         self.template_service: TemplateService | None = None
         self.print_service: PrintService | None = None
         self.verification_service: VerificationService | None = None
@@ -83,6 +92,9 @@ class MainWindow(QMainWindow):
             )
             self.photo_import_service = PhotoImportService(self.photo_service)
             self.import_service = ExcelImportService(self._context.database)
+            self.export_service = ExcelExportService(
+                self._context.database, student_service=service
+            )
             self.template_service = TemplateService(
                 self._context.database, self._context.paths
             )
@@ -98,6 +110,9 @@ class MainWindow(QMainWindow):
             self.default_certificate_type = snapshot.values.get(
                 DEFAULT_CERTIFICATE_TYPE_KEY, "graduation"
             )
+            table_columns = snapshot.values.get(
+                TABLE_COLUMNS_KEY, DEFAULT_TABLE_COLUMN_KEYS
+            )
             self.audit_service = AuditService(self._context.database)
             self.reset_service = ResetService(
                 self._context.database,
@@ -110,10 +125,12 @@ class MainWindow(QMainWindow):
                 numbering_service=self.numbering_service,
                 photo_service=self.photo_service,
                 import_service=self.import_service,
+                export_service=self.export_service,
                 print_service=self.print_service,
                 verification_service=self.verification_service,
                 initial_page_size=page_size,
                 default_certificate_type=self.default_certificate_type,
+                initial_table_columns=table_columns,
             )
             self.setCentralWidget(self.student_page)
             return
@@ -150,23 +167,25 @@ class MainWindow(QMainWindow):
             return
         data_menu = self.menuBar().addMenu("数据管理(&D)")
 
-        refresh_action = QAction("刷新(&R)", self)
-        refresh_action.setShortcut(QKeySequence("F5"))
-        refresh_action.triggered.connect(lambda: page.reload())
-        data_menu.addAction(refresh_action)
+        template_action = QAction("下载导入模板(&T)…", self)
+        template_action.triggered.connect(page.download_import_template)
+        data_menu.addAction(template_action)
 
         import_action = QAction("导入 Excel(&I)", self)
         import_action.triggered.connect(page.import_excel)
         data_menu.addAction(import_action)
         page.bind_import_action(import_action)
 
-        edit_action = QAction("编辑记录(&E)", self)
-        edit_action.triggered.connect(page.edit_selected)
-        data_menu.addAction(edit_action)
+        export_action = QAction("导出数据(&E)…", self)
+        export_action.triggered.connect(page.export_data)
+        data_menu.addAction(export_action)
 
-        delete_action = QAction("删除记录(&D)", self)
-        delete_action.triggered.connect(page.delete_selected)
-        data_menu.addAction(delete_action)
+        data_menu.addSeparator()
+
+        refresh_action = QAction("刷新(&R)", self)
+        refresh_action.setShortcut(QKeySequence("F5"))
+        refresh_action.triggered.connect(lambda: page.reload())
+        data_menu.addAction(refresh_action)
 
     def _build_photo_menu(self) -> None:
         service = self.photo_service
@@ -286,9 +305,7 @@ class MainWindow(QMainWindow):
         system_menu = self.menuBar().addMenu("系统管理(&S)")
 
         settings_action = QAction("系统设置(&S)…", self)
-        settings_action.triggered.connect(
-            lambda: SettingsDialog(settings_service, self).exec()
-        )
+        settings_action.triggered.connect(self.open_settings)
         system_menu.addAction(settings_action)
 
         audit_action = QAction("操作审计(&A)…", self)
@@ -309,6 +326,29 @@ class MainWindow(QMainWindow):
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(self.close)
         system_menu.addAction(quit_action)
+
+    def open_settings(self) -> None:
+        """打开系统设置；关闭后按服务端配置立即应用主页表格列。"""
+        service = self.settings_service
+        if service is None:  # pragma: no cover - 仅防御
+            return
+        SettingsDialog(service, self).exec()
+        self._apply_stored_table_columns()
+
+    def _apply_stored_table_columns(self) -> None:
+        """读取服务端配置并应用；与当前列相同时由页面自行忽略。"""
+        service = self.settings_service
+        page = self.student_page
+        if service is None or page is None:
+            return
+        try:
+            columns = service.load().values.get(TABLE_COLUMNS_KEY)
+        except ServiceError:
+            logger.exception("读取系统设置失败，主页表格列保持不变")
+            return
+        if not columns:
+            return
+        page.apply_table_columns(columns)
 
     def open_system_reset(self) -> None:
         """打开两步确认的系统重置窗口。"""
