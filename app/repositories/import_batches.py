@@ -55,6 +55,16 @@ class ImportBatchRepository(Repository):
             ).fetchone()
         return self._to_dict(row)
 
+    def delete_all(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """删除全部导入批次并返回删除行数；仅用于系统重置。"""
+        with self._write(connection) as conn:
+            cursor = conn.execute("DELETE FROM import_batches")
+            return int(cursor.rowcount)
+
     def list_batches(
         self,
         *,

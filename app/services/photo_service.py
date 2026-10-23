@@ -157,6 +157,10 @@ class PhotoService:
 
     # ------------------------------------------------------------------ 文件
 
+    def ensure_photos_dir(self) -> Path:
+        """确保照片目录可用并返回其绝对路径；供打开目录等界面操作复用。"""
+        return self._ensure_photos_dir()
+
     def _ensure_photos_dir(self) -> Path:
         photos_dir = self.paths.photos_dir
         if photos_dir.exists():

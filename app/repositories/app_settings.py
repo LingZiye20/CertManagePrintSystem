@@ -104,3 +104,13 @@ class AppSettingsRepository(Repository):
         with self._write(connection) as conn:
             cursor = conn.execute("DELETE FROM app_settings WHERE key = ?", (key,))
             return cursor.rowcount == 1
+
+    def delete_all(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """删除全部业务配置并返回删除行数；仅用于系统重置。"""
+        with self._write(connection) as conn:
+            cursor = conn.execute("DELETE FROM app_settings")
+            return int(cursor.rowcount)

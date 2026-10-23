@@ -64,3 +64,13 @@ class NumberSequenceRepository(Repository):
                 (next_value, sequence_key),
             )
             return cursor.rowcount == 1
+
+    def delete_all(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """删除全部流水记录并返回删除行数；仅用于系统重置后重建为 1。"""
+        with self._write(connection) as conn:
+            cursor = conn.execute("DELETE FROM number_sequences")
+            return int(cursor.rowcount)

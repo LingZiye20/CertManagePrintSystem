@@ -296,7 +296,16 @@ def test_page_entry_uses_current_filters_and_sort(
     captured: dict[str, Any] = {}
 
     class _FakeDialog:
-        def __init__(self, service_arg, filters, parent=None, *, order_by, descending):
+        def __init__(
+            self,
+            service_arg,
+            filters,
+            parent=None,
+            *,
+            order_by,
+            descending,
+            initial_type="graduation",
+        ):
             captured.update(
                 {
                     "service": service_arg,

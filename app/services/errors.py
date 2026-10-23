@@ -59,6 +59,10 @@ class PhotoPathError(PhotoError):
     """数据库中的照片相对路径不安全或超出照片目录。"""
 
 
+class PhotoImportError(PhotoError):
+    """照片批量导入的文件夹、关联字段或扫描参数不合法。"""
+
+
 class TemplateError(ServiceError):
     """模板业务错误基类。"""
 
@@ -93,4 +97,16 @@ class PrinterUnavailableError(PrintError):
 
 class PrintTemplateError(PrintError):
     """打印所需模板缺失或无法加载。"""
+
+
+class SettingsError(ServiceError):
+    """系统设置业务错误基类。"""
+
+
+class SettingsValidationError(SettingsError):
+    """设置键或设置取值不合法。"""
+
+
+class ResetError(ServiceError):
+    """系统重置前置检查失败或文件暂存无法完成。"""
 

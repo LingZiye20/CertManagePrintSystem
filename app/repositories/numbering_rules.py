@@ -81,3 +81,13 @@ class NumberingRuleRepository(Repository):
         with self._write(connection) as conn:
             cursor = conn.execute(sql, [value for _, value in items] + [rule_key])
             return cursor.rowcount == 1
+
+    def delete_all(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """删除全部编号规则并返回删除行数；仅用于系统重置后重建默认值。"""
+        with self._write(connection) as conn:
+            cursor = conn.execute("DELETE FROM numbering_rules")
+            return int(cursor.rowcount)

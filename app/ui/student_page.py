@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -44,7 +45,7 @@ from app.services import StudentQuery, StudentService
 from app.ui.import_result_dialog import ImportResultDialog
 from app.ui.numbering_dialog import NumberingDialog
 from app.ui.print_dialog import PrintDialog
-from app.ui.student_dialog import StudentDialog
+from app.ui.student_dialog import PHOTO_FILE_FILTER, StudentDialog
 from app.ui.verification_dialog import VerificationDialog
 
 logger = logging.getLogger(__name__)
@@ -205,21 +206,29 @@ class StudentPage(QWidget):
         import_service: ExcelImportService | None = None,
         print_service: PrintService | None = None,
         verification_service: VerificationService | None = None,
+        initial_page_size: int = PAGE_SIZE_CHOICES[0],
+        default_certificate_type: str = "graduation",
     ) -> None:
         super().__init__(parent)
         self.service = service
         self.numbering_service = numbering_service
         self.photo_service = photo_service
         self.import_service = import_service
+        self.import_action: QAction | None = None
         self.print_service = print_service
         self.verification_service = verification_service
+        self.default_certificate_type = default_certificate_type
         self.model = StudentTableModel(self)
         self._page = 1
         self._page_count = 1
         self._total = 0
         self._order_by = "student_no"
         self._descending = False
-        self._page_size = PAGE_SIZE_CHOICES[0]
+        self._page_size = (
+            initial_page_size
+            if initial_page_size in PAGE_SIZE_CHOICES
+            else PAGE_SIZE_CHOICES[0]
+        )
         self._build_ui()
         self.reload()
 
@@ -293,16 +302,12 @@ class StudentPage(QWidget):
 
     def _build_toolbar(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        self.add_button = QPushButton("新增")
-        self.add_button.clicked.connect(self.add_record)
         self.edit_button = QPushButton("编辑")
         self.edit_button.clicked.connect(self.edit_selected)
         self.delete_button = QPushButton("删除")
         self.delete_button.clicked.connect(self.delete_selected)
         self.generate_number_button = QPushButton("生成编号")
         self.generate_number_button.clicked.connect(self.generate_number_for_selected)
-        self.import_button = QPushButton("导入 Excel")
-        self.import_button.clicked.connect(self.import_excel)
         self.print_button = QPushButton("打印证书")
         self.print_button.clicked.connect(self.print_selected)
         self.verify_button = QPushButton("核验证书")
@@ -310,11 +315,9 @@ class StudentPage(QWidget):
         self.refresh_button = QPushButton("刷新")
         self.refresh_button.clicked.connect(lambda: self.reload())
 
-        row.addWidget(self.add_button)
         row.addWidget(self.edit_button)
         row.addWidget(self.delete_button)
         row.addWidget(self.generate_number_button)
-        row.addWidget(self.import_button)
         row.addWidget(self.print_button)
         row.addWidget(self.verify_button)
         row.addWidget(self.refresh_button)
@@ -345,7 +348,9 @@ class StudentPage(QWidget):
         self.page_size_combo = QComboBox()
         for size in PAGE_SIZE_CHOICES:
             self.page_size_combo.addItem(str(size), size)
-        self.page_size_combo.setCurrentIndex(0)
+        self.page_size_combo.setCurrentIndex(
+            max(0, self.page_size_combo.findData(self._page_size))
+        )
         self.page_size_combo.currentIndexChanged.connect(self._on_page_size_changed)
         row.addWidget(self.page_size_combo)
 
@@ -465,12 +470,6 @@ class StudentPage(QWidget):
 
     # ------------------------------------------------------------------ 增改删
 
-    def add_record(self) -> None:
-        dialog = StudentDialog(self, on_save=self._save_new_record)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.message_label.setText("新增记录成功")
-            self.reload(reset_page=True)
-
     def edit_selected(self) -> None:
         record = self._selected_record()
         if record is None:
@@ -514,6 +513,37 @@ class StudentPage(QWidget):
             return
         self.message_label.setText("删除记录成功")
         self.reload()
+
+    def set_photo_for_selected(self) -> None:
+        """为当前选中记录设置或更换毕业照片。"""
+        if self.photo_service is None:
+            self._show_info("当前未启用照片功能")
+            return
+        record = self._selected_record()
+        if record is None:
+            self._show_info("请先选择要设置照片的记录")
+            return
+        selected, _ = QFileDialog.getOpenFileName(
+            self, "选择毕业照片", "", PHOTO_FILE_FILTER
+        )
+        if not selected:
+            return
+        try:
+            result = self.photo_service.set_photo(record["id"], selected)
+        except ServiceError as exc:
+            self._show_error("照片设置失败", str(exc))
+            return
+        except Exception:  # noqa: BLE001 - 界面不得因照片异常崩溃
+            logger.exception("设置照片时发生未预期错误（记录 %s）", record.get("id"))
+            self._show_error("照片设置失败", "发生未预期错误，请查看日志后重试。")
+            return
+
+        message = f"学号 {record.get('student_no')} 的毕业照片已更新"
+        if result.cleanup_failed and result.cleanup_message:
+            message += f"（{result.cleanup_message}）"
+        self.message_label.setText(message)
+        self.reload()
+        QMessageBox.information(self, "照片设置成功", message)
 
     def generate_number_for_selected(self) -> None:
         """为当前选中记录打开编号预览/生成对话框。"""
@@ -629,7 +659,12 @@ class StudentPage(QWidget):
         if self.print_service is None:
             self._show_info("当前未启用打印功能")
             return
-        dialog = PrintDialog(self.print_service, records, self)
+        dialog = PrintDialog(
+            self.print_service,
+            records,
+            self,
+            initial_type=self.default_certificate_type,
+        )
         dialog.exec()
         if dialog.result is not None:
             self.message_label.setText(dialog.result.message)
@@ -645,6 +680,7 @@ class StudentPage(QWidget):
             self,
             order_by=self._order_by,
             descending=self._descending,
+            initial_type=self.default_certificate_type,
         )
 
     def verify_certificates(self) -> None:
@@ -652,6 +688,15 @@ class StudentPage(QWidget):
         dialog = self.create_verification_dialog()
         if dialog is not None:
             dialog.exec()
+
+    def bind_import_action(self, action: QAction) -> None:
+        """绑定菜单中的「导入 Excel」动作，导入期间禁用以防重复触发。"""
+        self.import_action = action
+        self._set_import_enabled(self.import_service is not None)
+
+    def _set_import_enabled(self, enabled: bool) -> None:
+        if self.import_action is not None:
+            self.import_action.setEnabled(enabled)
 
     def import_excel(self) -> ImportResult | None:
         """选择固定 37 列 Excel 文件并展示导入结果。"""
@@ -669,7 +714,7 @@ class StudentPage(QWidget):
             return None
 
         self.message_label.setText("正在导入…")
-        self.import_button.setEnabled(False)
+        self._set_import_enabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             result = self.import_service.import_file(Path(file_path))
@@ -682,7 +727,7 @@ class StudentPage(QWidget):
             return None
         finally:
             QApplication.restoreOverrideCursor()
-            self.import_button.setEnabled(self.import_service is not None)
+            self._set_import_enabled(self.import_service is not None)
 
         self._show_import_result(result)
         return result
@@ -692,9 +737,6 @@ class StudentPage(QWidget):
         if result.status == "success":
             self.reload(reset_page=True)
         ImportResultDialog(result, self).exec()
-
-    def _save_new_record(self, values: dict[str, str]) -> None:
-        self.service.create_record(values)
 
     def _selected_record(self) -> dict[str, Any] | None:
         selection = self.table.selectionModel()
@@ -712,7 +754,7 @@ class StudentPage(QWidget):
         self.generate_number_button.setEnabled(
             has_selection and self.numbering_service is not None
         )
-        self.import_button.setEnabled(self.import_service is not None)
+        self._set_import_enabled(self.import_service is not None)
         self.print_button.setEnabled(self.print_service is not None)
 
     # ------------------------------------------------------------------ 反馈

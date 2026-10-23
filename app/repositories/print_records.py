@@ -73,6 +73,16 @@ class PrintRecordRepository(Repository):
             ).fetchone()
         return self._to_dict(row)
 
+    def delete_all(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """删除全部打印记录并返回删除行数；仅用于系统重置。"""
+        with self._write(connection) as conn:
+            cursor = conn.execute("DELETE FROM print_records")
+            return int(cursor.rowcount)
+
     def list_records(
         self,
         *,

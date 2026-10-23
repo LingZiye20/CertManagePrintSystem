@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -20,8 +21,10 @@ from typing import Any
 
 from app.config.paths import AppPaths
 from app.data.db import Database
-from app.repositories import CertificateTemplateRepository
+from app.repositories import CertificateTemplateRepository, OperationLogRepository
 from app.services.errors import (
+    AuditWriteError,
+    DataAccessError,
     PhotoPathError,
     TemplateNotFoundError,
     TemplateReadOnlyError,
@@ -37,6 +40,19 @@ from app.services.template_renderer import (
 from app.utils.photo_paths import photo_file_path
 
 BUILTIN_TEMPLATE_DIR_NAME = "templates"
+
+TARGET_TEMPLATE = "certificate_template"
+OP_TEMPLATE_CREATE = "template_create"
+OP_TEMPLATE_UPDATE = "template_update"
+OP_TEMPLATE_DELETE = "template_delete"
+
+CERTIFICATE_TYPE_LABELS: dict[str, str] = {
+    "graduation": "毕结业证书",
+    "degree": "学位证书",
+    "other": "其他证书",
+}
+
+logger = logging.getLogger(__name__)
 
 # 固定映射：证书类型 → 内置模板资源文件名，不扫描目录中的任意 JSON。
 BUILTIN_TEMPLATE_FILES: dict[str, str] = {
@@ -76,6 +92,7 @@ class TemplateService:
         *,
         templates: CertificateTemplateRepository | None = None,
         renderer: CertificateRenderer | None = None,
+        logs: OperationLogRepository | None = None,
     ) -> None:
         self.database = database
         self.paths = paths
@@ -83,30 +100,88 @@ class TemplateService:
             templates if templates is not None else CertificateTemplateRepository(database)
         )
         self.renderer = renderer if renderer is not None else CertificateRenderer()
+        self.logs = logs if logs is not None else OperationLogRepository(database)
 
     # ------------------------------------------------------------------ 读写
 
     def create_template(self, template: CertificateTemplate) -> int:
-        """新增自定义模板，返回主键；数据库列由模型派生。"""
+        """新增自定义模板，返回主键；数据库列由模型派生，成功审计同事务。"""
         if not isinstance(template, CertificateTemplate):
             raise TemplateValidationError("模板对象类型不正确")
-        return self.templates.create(
-            is_builtin=0, **template.to_record_values()
-        )
+        try:
+            with self.database.transaction() as connection:
+                template_id = self.templates.create(
+                    is_builtin=0,
+                    connection=connection,
+                    **template.to_record_values(),
+                )
+                self._write_success_log(
+                    connection,
+                    OP_TEMPLATE_CREATE,
+                    template_id,
+                    f"新增证书模板：{_describe(template)}",
+                )
+                return template_id
+        except AuditWriteError:
+            logger.exception("模板新增成功但审计写入失败，已回滚")
+            raise
+        except sqlite3.Error as exc:
+            logger.exception("保存证书模板失败")
+            raise DataAccessError("保存证书模板失败，未写入数据库") from exc
 
     def update_template(self, template_id: int, template: CertificateTemplate) -> None:
-        """更新自定义模板；内置模板只读。"""
-        row = self._require_row(template_id)
-        self._ensure_editable(row)
+        """更新自定义模板；内置模板只读，成功审计同事务。"""
         if not isinstance(template, CertificateTemplate):
             raise TemplateValidationError("模板对象类型不正确")
-        self.templates.update(template_id, template.to_record_values())
+        try:
+            with self.database.transaction() as connection:
+                row = self.templates.get(template_id, connection=connection)
+                if row is None:
+                    raise TemplateNotFoundError(f"模板 {template_id} 不存在或已被删除")
+                self._ensure_editable(row)
+                self.templates.update(
+                    template_id, template.to_record_values(), connection=connection
+                )
+                self._write_success_log(
+                    connection,
+                    OP_TEMPLATE_UPDATE,
+                    template_id,
+                    f"修改证书模板：{_describe(template)}",
+                )
+        except AuditWriteError:
+            logger.exception("模板修改成功但审计写入失败，已回滚")
+            raise
+        except sqlite3.Error as exc:
+            logger.exception("更新证书模板失败")
+            raise DataAccessError("更新证书模板失败，模板未改变") from exc
 
     def delete_template(self, template_id: int) -> None:
-        """删除自定义模板；内置模板只读。"""
-        row = self._require_row(template_id)
-        self._ensure_editable(row)
-        self.templates.delete(template_id)
+        """删除自定义模板；内置模板只读，成功审计同事务。"""
+        try:
+            with self.database.transaction() as connection:
+                row = self.templates.get(template_id, connection=connection)
+                if row is None:
+                    raise TemplateNotFoundError(f"模板 {template_id} 不存在或已被删除")
+                self._ensure_editable(row)
+                if not self.templates.delete(template_id, connection=connection):
+                    raise TemplateNotFoundError(f"模板 {template_id} 不存在或已被删除")
+                label = CERTIFICATE_TYPE_LABELS.get(
+                    row["certificate_type"], row["certificate_type"]
+                )
+                self._write_success_log(
+                    connection,
+                    OP_TEMPLATE_DELETE,
+                    template_id,
+                    f"删除证书模板：{row['name']}（{label}，"
+                    f"{_format_mm(row['canvas_width_mm'])}×"
+                    f"{_format_mm(row['canvas_height_mm'])}mm）",
+                )
+        except AuditWriteError:
+            logger.exception("模板删除成功但审计写入失败，已回滚")
+            raise
+        except sqlite3.Error as exc:
+            logger.exception("删除证书模板失败")
+            raise DataAccessError("删除证书模板失败，模板未改变") from exc
 
     def load_template(self, template_id: int) -> CertificateTemplate:
         """按 ID 加载模板并校验列与 JSON 一致。"""
@@ -228,6 +303,26 @@ class TemplateService:
 
     # ------------------------------------------------------------------ 辅助
 
+    def _write_success_log(
+        self,
+        connection: sqlite3.Connection,
+        operation_type: str,
+        template_id: int,
+        summary: str,
+    ) -> None:
+        """成功审计：与模板写入同一事务，失败则回滚。"""
+        try:
+            self.logs.create(
+                operation_type,
+                TARGET_TEMPLATE,
+                str(template_id),
+                summary,
+                "success",
+                connection=connection,
+            )
+        except sqlite3.Error as exc:
+            raise AuditWriteError("审计日志写入失败，模板修改已回滚") from exc
+
     def _require_row(self, template_id: int) -> dict[str, Any]:
         row = self.templates.get(template_id)
         if row is None:
@@ -238,3 +333,18 @@ class TemplateService:
     def _ensure_editable(row: Mapping[str, Any]) -> None:
         if row["is_builtin"]:
             raise TemplateReadOnlyError("内置模板为只读，不能修改或删除")
+
+
+def _describe(template: CertificateTemplate) -> str:
+    label = CERTIFICATE_TYPE_LABELS.get(
+        template.certificate_type, template.certificate_type
+    )
+    return (
+        f"{template.name}（{label}，{_format_mm(template.canvas_width_mm)}×"
+        f"{_format_mm(template.canvas_height_mm)}mm）"
+    )
+
+
+def _format_mm(value: Any) -> str:
+    number = float(value)
+    return str(int(number)) if number.is_integer() else f"{number:g}"

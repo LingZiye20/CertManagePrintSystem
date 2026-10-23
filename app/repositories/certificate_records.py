@@ -40,6 +40,9 @@ NUMBER_FIELDS: tuple[str, ...] = (
     "other_certificate_no",
 )
 
+# 照片批量导入可用的匹配字段；只在 Service 层做精确匹配，不进入 SQL LIKE。
+PHOTO_MATCH_FIELDS: tuple[str, ...] = ("student_no", "id_number", "candidate_no")
+
 
 class CertificateRecordRepository(Repository):
     """``certificate_records`` 的读写入口。"""
@@ -239,6 +242,16 @@ class CertificateRecordRepository(Repository):
             cursor = conn.execute("DELETE FROM certificate_records WHERE id = ?", (record_id,))
             return cursor.rowcount == 1
 
+    def delete_all(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """删除全部学生记录并返回删除行数；仅用于系统重置。"""
+        with self._write(connection) as conn:
+            cursor = conn.execute("DELETE FROM certificate_records")
+            return int(cursor.rowcount)
+
     def count_records(
         self,
         *,
@@ -252,6 +265,30 @@ class CertificateRecordRepository(Repository):
                 f"SELECT COUNT(*) AS total FROM certificate_records{where}", params
             ).fetchone()
         return int(row["total"])
+
+    def list_for_photo_matching(
+        self,
+        field: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[dict[str, Any]]:
+        """返回照片批量导入匹配所需的最小字段集，按 ``id ASC`` 排序。
+
+        只允许 :data:`PHOTO_MATCH_FIELDS` 中的字段；匹配键的 ``strip()``
+        语义由 Service 层负责，这里不做 LIKE、不做格式猜测。
+        """
+        if field not in PHOTO_MATCH_FIELDS:
+            raise ValueError(f"不支持的照片匹配字段：{field}")
+
+        with self._read(connection) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, student_no, name, id_number, candidate_no, photo_path
+                FROM certificate_records
+                ORDER BY id ASC
+                """
+            ).fetchall()
+        return self._to_dicts(rows)
 
     def count_records_by_photo_path(
         self,

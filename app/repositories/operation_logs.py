@@ -95,6 +95,28 @@ class OperationLogRepository(Repository):
             ).fetchone()
         return int(row["total"])
 
+    def distinct_operation_types(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> tuple[str, ...]:
+        """返回库中已出现的操作类型，按名称稳定排序。"""
+        with self._read(connection) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT operation_type FROM operation_logs ORDER BY operation_type ASC"
+            ).fetchall()
+        return tuple(row["operation_type"] for row in rows)
+
+    def delete_all(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """删除全部操作日志并返回删除行数；仅用于系统重置。"""
+        with self._write(connection) as conn:
+            cursor = conn.execute("DELETE FROM operation_logs")
+            return int(cursor.rowcount)
+
     @staticmethod
     def _filter_clause(
         start_time: str | None,

@@ -162,3 +162,13 @@ class CertificateTemplateRepository(Repository):
                 "DELETE FROM certificate_templates WHERE id = ?", (template_id,)
             )
             return cursor.rowcount == 1
+
+    def delete_all(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """删除全部模板并返回删除行数；仅用于系统重置。"""
+        with self._write(connection) as conn:
+            cursor = conn.execute("DELETE FROM certificate_templates")
+            return int(cursor.rowcount)

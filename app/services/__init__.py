@@ -12,13 +12,17 @@ from app.services.errors import (
     InvalidPhotoError,
     NumberConflictError,
     PhotoError,
+    PhotoImportError,
     PhotoPathError,
     PhotoStorageError,
     PrintError,
     PrinterUnavailableError,
     PrintTemplateError,
     RecordNotFoundError,
+    ResetError,
     ServiceError,
+    SettingsError,
+    SettingsValidationError,
     TemplateDataError,
     TemplateError,
     TemplateNotFoundError,
@@ -27,6 +31,7 @@ from app.services.errors import (
     TemplateValidationError,
     ValidationError,
 )
+from app.services.audit_service import AuditEntry, AuditService
 from app.services.excel_import_service import (
     ExcelImportService,
     ImportIssue,
@@ -43,6 +48,16 @@ from app.services.numbering_service import (
     NumberPreview,
     compose_certificate_number,
 )
+from app.services.photo_import_service import (
+    PHOTO_KEY_FIELDS,
+    PhotoImportCandidate,
+    PhotoImportIssue,
+    PhotoImportMode,
+    PhotoImportReport,
+    PhotoImportService,
+    PhotoImportSuccess,
+    PhotoScanResult,
+)
 from app.services.photo_service import PhotoService, PhotoUpdateResult
 from app.services.print_service import (
     PRINT_ACCEPTED,
@@ -55,6 +70,14 @@ from app.services.print_service import (
     PrintTemplateOption,
 )
 from app.services.print_target import PageGeometry, PrintTarget, QtPrintTarget
+from app.services.reset_service import ResetResult, ResetScope, ResetService
+from app.services.settings_service import (
+    DEFAULT_CERTIFICATE_TYPE_KEY,
+    PAGE_SIZE_KEY,
+    SETTING_DEFINITIONS,
+    SettingsService,
+    SettingsSnapshot,
+)
 from app.services.student_service import StudentPage, StudentQuery, StudentService
 from app.services.template_model import (
     CertificateTemplate,
@@ -87,12 +110,15 @@ from app.services.verification_service import (
 )
 
 __all__ = [
+    "AuditEntry",
+    "AuditService",
     "AuditWriteError",
     "BUILTIN_TEMPLATE_FILES",
     "CERTIFICATE_TYPES",
     "CertificateRenderer",
     "CertificateTemplate",
     "CertificateType",
+    "DEFAULT_CERTIFICATE_TYPE_KEY",
     "DataAccessError",
     "DeleteBlockedError",
     "DuplicateStudentNoError",
@@ -111,7 +137,15 @@ __all__ = [
     "NumberingService",
     "PhotoElement",
     "PhotoError",
+    "PhotoImportCandidate",
+    "PhotoImportError",
+    "PhotoImportIssue",
+    "PhotoImportMode",
+    "PhotoImportReport",
+    "PhotoImportService",
+    "PhotoImportSuccess",
     "PhotoPathError",
+    "PhotoScanResult",
     "PhotoService",
     "PhotoStorageError",
     "PhotoUpdateResult",
@@ -127,13 +161,23 @@ __all__ = [
     "PrintTarget",
     "PrintTemplateError",
     "PrintTemplateOption",
+    "PAGE_SIZE_KEY",
     "PrinterUnavailableError",
     "QtPrintTarget",
     "RecordNotFoundError",
+    "ResetError",
+    "ResetResult",
+    "ResetScope",
+    "ResetService",
+    "SETTING_DEFINITIONS",
     "RenderResult",
     "RenderWarning",
     "SeedResult",
     "ServiceError",
+    "SettingsError",
+    "SettingsService",
+    "SettingsSnapshot",
+    "SettingsValidationError",
     "STATUS_LABELS",
     "StudentPage",
     "StudentQuery",

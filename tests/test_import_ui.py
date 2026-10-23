@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QPushButton
 
 from app.bootstrap import bootstrap
 from app.config.paths import AppPaths
@@ -49,9 +49,52 @@ def page(
     widget.close()
 
 
-def test_import_button_is_available(page: StudentPage) -> None:
-    assert page.import_button.text() == "导入 Excel"
-    assert page.import_button.isEnabled() is True
+def test_import_menu_action_is_available(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    from PySide6.QtGui import QAction
+
+    context = bootstrap(AppPaths.for_program(tmp_path))
+    window = MainWindow(context=context)
+    window.show()
+    qapp.processEvents()
+
+    page = window.student_page
+    assert page is not None
+    assert page.import_service is not None
+    actions = {action.text(): action for action in window.findChildren(QAction)}
+    assert "导入 Excel(&I)" in actions
+    assert actions["导入 Excel(&I)"].isEnabled() is True
+    assert "新增记录(&A)" not in actions
+    assert not hasattr(page, "add_button")
+    assert not hasattr(page, "import_button")
+    window.close()
+
+
+def test_data_menu_order_and_toolbar_without_add_entry(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    context = bootstrap(AppPaths.for_program(tmp_path))
+    window = MainWindow(context=context)
+    window.show()
+    qapp.processEvents()
+
+    data_menu = next(
+        menu for menu in window.findChildren(QMenu) if menu.title() == "数据管理(&D)"
+    )
+    assert [action.text() for action in data_menu.actions()] == [
+        "刷新(&R)",
+        "导入 Excel(&I)",
+        "编辑记录(&E)",
+        "删除记录(&D)",
+    ]
+
+    page = window.student_page
+    assert page is not None
+    toolbar_texts = [button.text() for button in page.findChildren(QPushButton)]
+    assert "新增" not in toolbar_texts
+    assert "导入 Excel" not in toolbar_texts
+    window.close()
 
 
 def test_cancel_file_dialog_does_not_write_or_show_success(
