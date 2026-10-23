@@ -14,6 +14,9 @@ from app.services.errors import (
     PhotoError,
     PhotoPathError,
     PhotoStorageError,
+    PrintError,
+    PrinterUnavailableError,
+    PrintTemplateError,
     RecordNotFoundError,
     ServiceError,
     TemplateDataError,
@@ -41,6 +44,17 @@ from app.services.numbering_service import (
     compose_certificate_number,
 )
 from app.services.photo_service import PhotoService, PhotoUpdateResult
+from app.services.print_service import (
+    PRINT_ACCEPTED,
+    PRINT_FAILED,
+    PRINT_UNKNOWN,
+    PrintAttempt,
+    PrintBatchResult,
+    PrintPreflight,
+    PrintService,
+    PrintTemplateOption,
+)
+from app.services.print_target import PageGeometry, PrintTarget, QtPrintTarget
 from app.services.student_service import StudentPage, StudentQuery, StudentService
 from app.services.template_model import (
     CertificateTemplate,
@@ -91,6 +105,20 @@ __all__ = [
     "PhotoService",
     "PhotoStorageError",
     "PhotoUpdateResult",
+    "PRINT_ACCEPTED",
+    "PRINT_FAILED",
+    "PRINT_UNKNOWN",
+    "PageGeometry",
+    "PrintAttempt",
+    "PrintBatchResult",
+    "PrintError",
+    "PrintPreflight",
+    "PrintService",
+    "PrintTarget",
+    "PrintTemplateError",
+    "PrintTemplateOption",
+    "PrinterUnavailableError",
+    "QtPrintTarget",
     "RecordNotFoundError",
     "RenderResult",
     "RenderWarning",

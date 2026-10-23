@@ -169,6 +169,44 @@ class CertificateRecordRepository(Repository):
             ).fetchall()
         return self._to_dicts(rows)
 
+    def list_by_ids(
+        self,
+        record_ids: Sequence[int],
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[dict[str, Any]]:
+        """按主键批量查询，返回存在的记录并按 ``id ASC`` 排序。
+
+        重复 ID 自动去重；不存在的 ID 直接忽略；超过 500 个时分块查询。
+        """
+        unique = list(
+            dict.fromkeys(
+                int(record_id)
+                for record_id in record_ids
+                if isinstance(record_id, int) and not isinstance(record_id, bool)
+            )
+        )
+        if not unique:
+            return []
+
+        rows: list[sqlite3.Row] = []
+        with self._read(connection) as conn:
+            for start in range(0, len(unique), 500):
+                chunk = unique[start : start + 500]
+                placeholders = ", ".join("?" for _ in chunk)
+                rows.extend(
+                    conn.execute(
+                        f"""
+                        SELECT * FROM certificate_records
+                        WHERE id IN ({placeholders})
+                        ORDER BY id ASC
+                        """,
+                        chunk,
+                    ).fetchall()
+                )
+        rows.sort(key=lambda row: row["id"])
+        return self._to_dicts(rows)
+
     def update(
         self,
         record_id: int,

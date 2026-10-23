@@ -87,7 +87,7 @@ def test_filter_search_and_clear(
     qapp.processEvents()
 
     assert page.model.rowCount() == 1
-    assert page.model.data(page.model.index(0, 0)) == "S-1"
+    assert page.model.data(page.model.index(0, 1)) == "S-1"
     assert "共 1 条" in page.summary_label.text()
 
     page.clear_button.click()
@@ -102,16 +102,16 @@ def test_header_click_toggles_sort(
     for student_no in ("S-2", "S-1", "S-3"):
         student_service.create_record({"student_no": student_no})
     page.reload()
-    assert page.model.data(page.model.index(0, 0)) == "S-1"
+    assert page.model.data(page.model.index(0, 1)) == "S-1"
 
-    page._on_header_clicked(0)
+    page._on_header_clicked(1)
     qapp.processEvents()
-    assert page.model.data(page.model.index(0, 0)) == "S-3"
+    assert page.model.data(page.model.index(0, 1)) == "S-3"
     assert page.table.horizontalHeader().sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
 
-    page._on_header_clicked(0)
+    page._on_header_clicked(1)
     qapp.processEvents()
-    assert page.model.data(page.model.index(0, 0)) == "S-1"
+    assert page.model.data(page.model.index(0, 1)) == "S-1"
 
 
 def test_selection_enables_actions(

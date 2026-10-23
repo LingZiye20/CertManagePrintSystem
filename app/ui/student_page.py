@@ -35,12 +35,14 @@ from app.services import (
     ImportResult,
     NumberingService,
     PhotoService,
+    PrintService,
     ServiceError,
     StudentPage as StudentPageResult,
 )
 from app.services import StudentQuery, StudentService
 from app.ui.import_result_dialog import ImportResultDialog
 from app.ui.numbering_dialog import NumberingDialog
+from app.ui.print_dialog import PrintDialog
 from app.ui.student_dialog import StudentDialog
 
 logger = logging.getLogger(__name__)
@@ -62,11 +64,14 @@ PAGE_SIZE_CHOICES: tuple[int, ...] = (20, 50, 100)
 
 
 class StudentTableModel(QAbstractTableModel):
-    """只读表格模型，持有一页记录的快照。"""
+    """只读表格模型，持有一页记录的快照与跨页勾选集合。"""
+
+    CHECK_COLUMN = 0
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._rows: list[dict[str, Any]] = []
+        self._checked_ids: list[int] = []
 
     def set_rows(self, rows: list[dict[str, Any]]) -> None:
         self.beginResetModel()
@@ -86,16 +91,55 @@ class StudentTableModel(QAbstractTableModel):
     def columnCount(self, parent: QModelIndex | None = None) -> int:  # noqa: N802
         if parent is not None and parent.isValid():
             return 0
-        return len(TABLE_COLUMNS)
+        return len(TABLE_COLUMNS) + 1
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid():
             return None
+        if index.column() == self.CHECK_COLUMN:
+            if role == Qt.ItemDataRole.CheckStateRole:
+                record = self._rows[index.row()]
+                return (
+                    Qt.CheckState.Checked
+                    if record["id"] in self._checked_ids
+                    else Qt.CheckState.Unchecked
+                )
+            return None
         if role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
             return None
-        field = TABLE_COLUMNS[index.column()][0]
+        field = TABLE_COLUMNS[index.column() - 1][0]
         value = self._rows[index.row()].get(field)
         return "" if value is None else str(value)
+
+    def setData(  # noqa: N802
+        self,
+        index: QModelIndex,
+        value: Any,
+        role: int = Qt.ItemDataRole.CheckStateRole,
+    ) -> bool:
+        if (
+            not index.isValid()
+            or index.column() != self.CHECK_COLUMN
+            or role != Qt.ItemDataRole.CheckStateRole
+        ):
+            return False
+        record = self._rows[index.row()]
+        record_id = int(record["id"])
+        checked = Qt.CheckState(value) == Qt.CheckState.Checked
+        if checked and record_id not in self._checked_ids:
+            self._checked_ids.append(record_id)
+        elif not checked and record_id in self._checked_ids:
+            self._checked_ids.remove(record_id)
+        self.dataChanged.emit(
+            index, index, [Qt.ItemDataRole.CheckStateRole]
+        )
+        return True
+
+    def flags(self, index: QModelIndex) -> Qt.ItemFlag:  # noqa: N802
+        base = super().flags(index)
+        if index.isValid() and index.column() == self.CHECK_COLUMN:
+            return base | Qt.ItemFlag.ItemIsUserCheckable
+        return base
 
     def headerData(  # noqa: N802
         self,
@@ -106,8 +150,44 @@ class StudentTableModel(QAbstractTableModel):
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         if orientation == Qt.Orientation.Horizontal:
-            return TABLE_COLUMNS[section][1]
+            if section == self.CHECK_COLUMN:
+                return "选择"
+            return TABLE_COLUMNS[section - 1][1]
         return section + 1
+
+    # ------------------------------------------------------------------ 勾选
+
+    def checked_ids(self) -> list[int]:
+        """返回勾选顺序的证书记录 ID（跨页保留）。"""
+        return list(self._checked_ids)
+
+    def current_ids(self) -> list[int]:
+        """返回当前页记录 ID，用于「全选本页」。"""
+        return [int(record["id"]) for record in self._rows]
+
+    def clear_checked(self) -> None:
+        if not self._checked_ids:
+            return
+        self._checked_ids.clear()
+        self._emit_check_changed()
+
+    def check_rows(self, row_ids: list[int]) -> None:
+        changed = False
+        for record_id in row_ids:
+            if record_id not in self._checked_ids:
+                self._checked_ids.append(record_id)
+                changed = True
+        if changed:
+            self._emit_check_changed()
+
+    def _emit_check_changed(self) -> None:
+        if not self._rows:
+            return
+        top = self.index(0, self.CHECK_COLUMN)
+        bottom = self.index(len(self._rows) - 1, self.CHECK_COLUMN)
+        self.dataChanged.emit(
+            top, bottom, [Qt.ItemDataRole.CheckStateRole]
+        )
 
 
 class StudentPage(QWidget):
@@ -121,12 +201,14 @@ class StudentPage(QWidget):
         numbering_service: NumberingService | None = None,
         photo_service: PhotoService | None = None,
         import_service: ExcelImportService | None = None,
+        print_service: PrintService | None = None,
     ) -> None:
         super().__init__(parent)
         self.service = service
         self.numbering_service = numbering_service
         self.photo_service = photo_service
         self.import_service = import_service
+        self.print_service = print_service
         self.model = StudentTableModel(self)
         self._page = 1
         self._page_count = 1
@@ -150,14 +232,16 @@ class StudentPage(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
+        self.table.setColumnWidth(0, 40)
         header = self.table.horizontalHeader()
         header.setSectionsClickable(True)
         header.setStretchLastSection(True)
         header.setSortIndicatorShown(True)
-        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        header.setSortIndicator(1, Qt.SortOrder.AscendingOrder)
         header.sectionClicked.connect(self._on_header_clicked)
         self.table.doubleClicked.connect(lambda _index: self.edit_selected())
         self.table.selectionModel().selectionChanged.connect(self._sync_action_buttons)
+        self.model.dataChanged.connect(lambda *args: self._sync_checked_label())
         layout.addWidget(self.table, 1)
 
         layout.addLayout(self._build_pagination())
@@ -215,6 +299,8 @@ class StudentPage(QWidget):
         self.generate_number_button.clicked.connect(self.generate_number_for_selected)
         self.import_button = QPushButton("导入 Excel")
         self.import_button.clicked.connect(self.import_excel)
+        self.print_button = QPushButton("打印证书")
+        self.print_button.clicked.connect(self.print_selected)
         self.refresh_button = QPushButton("刷新")
         self.refresh_button.clicked.connect(lambda: self.reload())
 
@@ -223,8 +309,19 @@ class StudentPage(QWidget):
         row.addWidget(self.delete_button)
         row.addWidget(self.generate_number_button)
         row.addWidget(self.import_button)
+        row.addWidget(self.print_button)
         row.addWidget(self.refresh_button)
         row.addStretch(1)
+
+        self.select_all_button = QPushButton("全选本页")
+        self.select_all_button.clicked.connect(self.check_all_current_page)
+        self.clear_checked_button = QPushButton("清除勾选")
+        self.clear_checked_button.clicked.connect(self.clear_checked)
+        self.checked_label = QLabel("已勾选 0 条")
+        self.checked_label.setStyleSheet("color: #444444;")
+        row.addWidget(self.select_all_button)
+        row.addWidget(self.clear_checked_button)
+        row.addWidget(self.checked_label)
 
         self.message_label = QLabel("")
         self.message_label.setStyleSheet("color: #444444;")
@@ -291,6 +388,7 @@ class StudentPage(QWidget):
     def apply_filters(self) -> None:
         """应用筛选条件并从第一页开始查询。"""
         self._page = 1
+        self._reset_checks("筛选条件已变化，勾选已清空")
         self.reload()
 
     def clear_filters(self) -> None:
@@ -303,6 +401,7 @@ class StudentPage(QWidget):
         ):
             line_edit.clear()
         self._page = 1
+        self._reset_checks("筛选条件已变化，勾选已清空")
         self.reload()
 
     def previous_page(self) -> None:
@@ -323,7 +422,9 @@ class StudentPage(QWidget):
         self.reload()
 
     def _on_header_clicked(self, column: int) -> None:
-        field = TABLE_COLUMNS[column][0]
+        if column == StudentTableModel.CHECK_COLUMN:
+            return
+        field = TABLE_COLUMNS[column - 1][0]
         if field == self._order_by:
             self._descending = not self._descending
         else:
@@ -336,6 +437,7 @@ class StudentPage(QWidget):
         )
         self.table.horizontalHeader().setSortIndicator(column, order)
         self._page = 1
+        self._reset_checks("排序已变化，勾选已清空")
         self.reload()
 
     def _apply_result(self, result: StudentPageResult) -> None:
@@ -428,6 +530,103 @@ class StudentPage(QWidget):
         )
         dialog.exec()
 
+    # ------------------------------------------------------------------ 勾选与打印
+
+    def check_all_current_page(self) -> None:
+        """把当前页全部记录加入勾选集合。"""
+        self.model.check_rows(self.model.current_ids())
+        self._sync_checked_label()
+
+    def clear_checked(self) -> None:
+        self.model.clear_checked()
+        self._sync_checked_label()
+
+    def _reset_checks(self, message: str | None = None) -> None:
+        if not self.model.checked_ids():
+            return
+        self.model.clear_checked()
+        self._sync_checked_label()
+        if message:
+            self.message_label.setText(message)
+
+    def _sync_checked_label(self) -> None:
+        self.checked_label.setText(f"已勾选 {len(self.model.checked_ids())} 条")
+
+    def print_selected(self) -> None:
+        """打印当前选中的单条记录。"""
+        if self.print_service is None:
+            self._show_info("当前未启用打印功能")
+            return
+        record = self._selected_record()
+        if record is None:
+            self._show_info("请先选择要打印的记录")
+            return
+        self._open_print_dialog([record])
+
+    def print_filtered(self) -> None:
+        """打印当前筛选与排序下的全部记录（点击瞬间取快照）。"""
+        if self.print_service is None:
+            self._show_info("当前未启用打印功能")
+            return
+        try:
+            records = self.service.list_for_print(
+                self.filters(),
+                order_by=self._order_by,
+                descending=self._descending,
+            )
+        except ServiceError as exc:
+            self._show_error("读取打印数据失败", str(exc))
+            return
+        if not records:
+            self._show_info("当前筛选结果没有可打印的记录")
+            return
+        if not self._confirm_batch(len(records), "当前筛选结果"):
+            return
+        self._open_print_dialog(records)
+
+    def print_checked(self) -> None:
+        """按勾选顺序打印被勾选的记录。"""
+        if self.print_service is None:
+            self._show_info("当前未启用打印功能")
+            return
+        record_ids = self.checked_ids()
+        if not record_ids:
+            self._show_info("请先勾选要打印的记录")
+            return
+        try:
+            records = self.service.records_by_ids(record_ids)
+        except ServiceError as exc:
+            self._show_error("读取打印数据失败", str(exc))
+            return
+        if not records:
+            self._show_info("勾选的记录已不存在，请刷新后重试")
+            return
+        if not self._confirm_batch(len(records), "勾选记录"):
+            return
+        self._open_print_dialog(records)
+
+    def checked_ids(self) -> list[int]:
+        return self.model.checked_ids()
+
+    def _confirm_batch(self, count: int, scope: str) -> bool:
+        reply = QMessageBox.question(
+            self,
+            "确认打印",
+            f"将按当前顺序打印{scope}共 {count} 条记录，是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _open_print_dialog(self, records: list[dict[str, Any]]) -> None:
+        if self.print_service is None:
+            self._show_info("当前未启用打印功能")
+            return
+        dialog = PrintDialog(self.print_service, records, self)
+        dialog.exec()
+        if dialog.result is not None:
+            self.message_label.setText(dialog.result.message)
+
     def import_excel(self) -> ImportResult | None:
         """选择固定 37 列 Excel 文件并展示导入结果。"""
         if self.import_service is None:
@@ -488,6 +687,7 @@ class StudentPage(QWidget):
             has_selection and self.numbering_service is not None
         )
         self.import_button.setEnabled(self.import_service is not None)
+        self.print_button.setEnabled(self.print_service is not None)
 
     # ------------------------------------------------------------------ 反馈
 

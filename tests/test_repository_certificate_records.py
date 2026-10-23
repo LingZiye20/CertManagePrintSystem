@@ -100,6 +100,28 @@ def test_existing_student_nos_handles_more_than_sqlite_parameter_limit(
     assert found == set(student_numbers)
 
 
+def test_list_by_ids_returns_existing_records_in_id_order(
+    repo: CertificateRecordRepository,
+) -> None:
+    first = repo.create({"student_no": "S-1"})
+    second = repo.create({"student_no": "S-2"})
+
+    rows = repo.list_by_ids([second, first, 999999, second])
+
+    assert [row["id"] for row in rows] == [first, second]
+    assert repo.list_by_ids([]) == []
+
+
+def test_list_by_ids_handles_more_than_sqlite_parameter_limit(
+    repo: CertificateRecordRepository,
+) -> None:
+    ids = [repo.create({"student_no": f"S-{index:04d}"}) for index in range(501)]
+
+    rows = repo.list_by_ids(ids)
+
+    assert [row["id"] for row in rows] == ids
+
+
 def test_certificate_numbers_are_optional_and_independent(repo: CertificateRecordRepository) -> None:
     only_graduation = repo.create({"student_no": "S-1", "certificate_no": "NO-A"})
     only_degree = repo.create({"student_no": "S-2", "degree_certificate_no": "NO-A"})

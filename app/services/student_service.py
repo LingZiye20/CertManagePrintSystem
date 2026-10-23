@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from math import ceil
@@ -239,6 +239,62 @@ class StudentService:
             logger.exception("删除学生记录失败")
             self._audit_failure("student_delete", record_id, {}, str(error))
             raise error from exc
+
+    # ------------------------------------------------------------------ 打印取数
+
+    def list_for_print(
+        self,
+        filters: Mapping[str, str] | None = None,
+        *,
+        order_by: str = "student_no",
+        descending: bool = False,
+    ) -> list[dict[str, Any]]:
+        """返回当前筛选与排序下的全部记录（不分页），供批量打印使用。
+
+        Raises:
+            ValidationError: 排序或筛选字段不在白名单内。
+            DataAccessError: 数据库读取失败。
+        """
+        resolved_filters = self._normalize_filters(filters or {})
+        if order_by not in SORTABLE_FIELDS:
+            raise ValidationError(f"不支持的排序字段：{order_by}")
+        if not isinstance(descending, bool):
+            raise ValidationError("排序方向必须为布尔值")
+
+        try:
+            return self.records.list_records(
+                order_by=order_by,
+                descending=descending,
+                filters=resolved_filters,
+            )
+        except sqlite3.Error as exc:
+            logger.exception("读取打印数据失败")
+            raise DataAccessError("读取打印数据失败，请稍后重试") from exc
+
+    def records_by_ids(self, record_ids: Sequence[int]) -> list[dict[str, Any]]:
+        """按给定顺序返回记录快照；不存在的 ID 直接忽略。
+
+        Raises:
+            DataAccessError: 数据库读取失败。
+        """
+        requested = list(
+            dict.fromkeys(
+                record_id
+                for record_id in record_ids
+                if isinstance(record_id, int) and not isinstance(record_id, bool)
+            )
+        )
+        if not requested:
+            return []
+
+        try:
+            rows = self.records.list_by_ids(requested)
+        except sqlite3.Error as exc:
+            logger.exception("按 ID 读取打印数据失败")
+            raise DataAccessError("读取打印数据失败，请稍后重试") from exc
+
+        by_id = {row["id"]: row for row in rows}
+        return [by_id[record_id] for record_id in requested if record_id in by_id]
 
     # ------------------------------------------------------------------ 内部
 

@@ -82,3 +82,15 @@ class TemplateReadOnlyError(TemplateError):
 class TemplateResourceError(TemplateError):
     """内置模板资源缺失、无法读取或内容无效。"""
 
+
+class PrintError(ServiceError):
+    """打印业务错误基类。"""
+
+
+class PrinterUnavailableError(PrintError):
+    """打印设备不可用或打印机分辨率无法读取。"""
+
+
+class PrintTemplateError(PrintError):
+    """打印所需模板缺失或无法加载。"""
+

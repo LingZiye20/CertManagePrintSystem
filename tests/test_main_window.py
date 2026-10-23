@@ -71,3 +71,33 @@ def test_template_designer_menu_is_wired(
 
     window.close()
     settings.sync()
+
+
+def test_print_menu_is_wired(qapp: QApplication, tmp_path) -> None:
+    from PySide6.QtGui import QAction
+
+    from app.bootstrap import bootstrap
+    from app.config.paths import AppPaths
+
+    paths = AppPaths.for_program(tmp_path)
+    context = bootstrap(paths)
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    window = MainWindow(settings=settings, context=context)
+    window.show()
+    qapp.processEvents()
+
+    assert window.print_service is not None
+    assert window.student_page is not None
+    assert window.student_page.print_service is window.print_service
+    assert window.student_page.print_button.isEnabled() is True
+
+    actions = {action.text(): action for action in window.findChildren(QAction)}
+    for label in (
+        "打印选中记录(&S)",
+        "打印当前筛选结果(&F)",
+        "打印勾选记录(&C)",
+    ):
+        assert label in actions
+
+    window.close()
+    settings.sync()

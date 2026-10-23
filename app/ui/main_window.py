@@ -16,6 +16,7 @@ from app.services import (
     ExcelImportService,
     NumberingService,
     PhotoService,
+    PrintService,
     StudentService,
     TemplateService,
 )
@@ -47,6 +48,7 @@ class MainWindow(QMainWindow):
         self.photo_service: PhotoService | None = None
         self.import_service: ExcelImportService | None = None
         self.template_service: TemplateService | None = None
+        self.print_service: PrintService | None = None
         self.setWindowTitle(WINDOW_TITLE)
         self.resize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
         self._build_central_widget()
@@ -65,12 +67,18 @@ class MainWindow(QMainWindow):
             self.template_service = TemplateService(
                 self._context.database, self._context.paths
             )
+            self.print_service = PrintService(
+                self._context.database,
+                self.template_service,
+                self._context.paths,
+            )
             self.student_page = StudentPage(
                 service,
                 self,
                 numbering_service=self.numbering_service,
                 photo_service=self.photo_service,
                 import_service=self.import_service,
+                print_service=self.print_service,
             )
             self.setCentralWidget(self.student_page)
             return
@@ -92,6 +100,8 @@ class MainWindow(QMainWindow):
             self._build_numbering_menu()
         if self.template_service is not None:
             self._build_template_menu()
+        if self.print_service is not None:
+            self._build_print_menu()
 
         help_menu = self.menuBar().addMenu("帮助(&H)")
         about_action = QAction("关于(&A)", self)
@@ -147,6 +157,24 @@ class MainWindow(QMainWindow):
             lambda: TemplateDesignerDialog(service, self).exec()
         )
         template_menu.addAction(designer_action)
+
+    def _build_print_menu(self) -> None:
+        page = self.student_page
+        if page is None:  # pragma: no cover - 仅防御
+            return
+        print_menu = self.menuBar().addMenu("打印管理(&P)")
+
+        selected_action = QAction("打印选中记录(&S)", self)
+        selected_action.triggered.connect(page.print_selected)
+        print_menu.addAction(selected_action)
+
+        filtered_action = QAction("打印当前筛选结果(&F)", self)
+        filtered_action.triggered.connect(page.print_filtered)
+        print_menu.addAction(filtered_action)
+
+        checked_action = QAction("打印勾选记录(&C)", self)
+        checked_action.triggered.connect(page.print_checked)
+        print_menu.addAction(checked_action)
 
     def _show_about(self) -> None:
         QMessageBox.about(self, "关于", f"{WINDOW_TITLE}\n版本 {__version__}")

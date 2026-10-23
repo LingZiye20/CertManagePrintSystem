@@ -373,6 +373,53 @@ def test_search_database_error_translated(
         student_service.search()
 
 
+# ---------------------------------------------------------------- 打印取数
+
+
+def test_list_for_print_returns_all_matching_records(
+    student_service: StudentService,
+) -> None:
+    for index in range(25):
+        student_service.create_record(
+            {"student_no": f"S-{index:02d}", "name": "打印测试"}
+        )
+    student_service.create_record({"student_no": "X-1", "name": "其他"})
+
+    rows = student_service.list_for_print(
+        filters={"name": "打印"}, order_by="student_no"
+    )
+
+    assert len(rows) == 25
+    assert rows[0]["student_no"] == "S-00"
+    assert rows[-1]["student_no"] == "S-24"
+
+    descending = student_service.list_for_print(
+        filters={"name": "打印"}, order_by="student_no", descending=True
+    )
+    assert descending[0]["student_no"] == "S-24"
+
+
+def test_list_for_print_rejects_invalid_sort_and_filter(
+    student_service: StudentService,
+) -> None:
+    with pytest.raises(ValidationError):
+        student_service.list_for_print(order_by="unknown")
+    with pytest.raises(ValidationError):
+        student_service.list_for_print(filters={"id_number": "x"})
+
+
+def test_records_by_ids_preserves_requested_order(
+    student_service: StudentService,
+) -> None:
+    first = student_service.create_record({"student_no": "S-1"})
+    second = student_service.create_record({"student_no": "S-2"})
+
+    rows = student_service.records_by_ids([second, first, 999999])
+
+    assert [row["id"] for row in rows] == [second, first]
+    assert student_service.records_by_ids([]) == []
+
+
 # ---------------------------------------------------------------- 审计
 
 
