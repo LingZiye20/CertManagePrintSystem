@@ -28,7 +28,6 @@ from app.repositories import (
     CertificateTemplateRepository,
     ImportBatchRepository,
     NumberingRuleRepository,
-    NumberSequenceRepository,
     OperationLogRepository,
     PrintRecordRepository,
 )
@@ -79,7 +78,6 @@ class ResetService:
         batches: ImportBatchRepository | None = None,
         templates: CertificateTemplateRepository | None = None,
         rules: NumberingRuleRepository | None = None,
-        sequences: NumberSequenceRepository | None = None,
         settings: AppSettingsRepository | None = None,
         logs: OperationLogRepository | None = None,
     ) -> None:
@@ -97,9 +95,6 @@ class ResetService:
             templates if templates is not None else CertificateTemplateRepository(database)
         )
         self.rules = rules if rules is not None else NumberingRuleRepository(database)
-        self.sequences = (
-            sequences if sequences is not None else NumberSequenceRepository(database)
-        )
         self.settings = (
             settings if settings is not None else AppSettingsRepository(database)
         )
@@ -118,7 +113,7 @@ class ResetService:
                 "全部操作日志（操作审计历史）",
                 "全部自定义模板（恢复三份内置模板）",
                 "全部自定义业务设置（恢复默认值）",
-                "三类编号规则与流水（流水恢复为 1）",
+                "三类编号规则（恢复默认值）",
                 "受管理的学生照片文件（photos 目录内的文件）",
                 "应用运行日志内容（logs/app.log）",
             ),
@@ -201,7 +196,6 @@ class ResetService:
                 "import_batches": self.batches.delete_all(connection=connection),
                 "certificate_templates": self.templates.delete_all(connection=connection),
                 "numbering_rules": self.rules.delete_all(connection=connection),
-                "number_sequences": self.sequences.delete_all(connection=connection),
                 "app_settings": self.settings.delete_all(connection=connection),
                 "operation_logs": self.logs.delete_all(connection=connection),
             }
@@ -313,5 +307,5 @@ def _success_message(counts: Mapping[str, int], photos: int) -> str:
         f"导入批次 {counts.get('import_batches', 0)} 条、"
         f"操作日志 {counts.get('operation_logs', 0)} 条、"
         f"自定义模板 {counts.get('certificate_templates', 0)} 份、"
-        f"照片 {photos} 个；已恢复内置模板、默认编号规则与流水起始值"
+        f"照片 {photos} 个；已恢复内置模板与默认编号规则"
     )

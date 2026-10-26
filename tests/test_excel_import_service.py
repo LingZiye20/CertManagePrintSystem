@@ -774,13 +774,10 @@ def test_failed_batch_summary_contains_row_and_field(
     assert "学号" in batch["error_summary"]
 
 
-def test_import_does_not_generate_or_consume_numbers(
+def test_import_does_not_generate_or_change_numbers(
     import_service: ExcelImportService, tmp_path: Path
 ) -> None:
     with import_service.database.connect() as connection:
-        before_sequences = [
-            dict(row) for row in connection.execute("SELECT * FROM number_sequences")
-        ]
         before_rules = [
             dict(row) for row in connection.execute("SELECT * FROM numbering_rules")
         ]
@@ -790,14 +787,10 @@ def test_import_does_not_generate_or_consume_numbers(
 
     assert result.status == "success"
     with import_service.database.connect() as connection:
-        after_sequences = [
-            dict(row) for row in connection.execute("SELECT * FROM number_sequences")
-        ]
         after_rules = [
             dict(row) for row in connection.execute("SELECT * FROM numbering_rules")
         ]
 
-    assert after_sequences == before_sequences
     assert after_rules == before_rules
     record = _records(import_service)[0]
     for field in CERTIFICATE_FIELDS:

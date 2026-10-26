@@ -30,31 +30,31 @@ def test_connection_enables_foreign_keys_and_busy_timeout(database: Database) ->
 def test_transaction_commits_on_success(database: Database) -> None:
     with database.transaction() as connection:
         connection.execute(
-            "UPDATE number_sequences SET next_value = ? WHERE sequence_key = 'degree'",
+            "UPDATE numbering_rules SET sequence_width = ? WHERE rule_key = 'degree'",
             (7,),
         )
 
     with database.connect() as connection:
         row = connection.execute(
-            "SELECT next_value FROM number_sequences WHERE sequence_key = 'degree'"
+            "SELECT sequence_width FROM numbering_rules WHERE rule_key = 'degree'"
         ).fetchone()
-    assert row["next_value"] == 7
+    assert row["sequence_width"] == 7
 
 
 def test_transaction_rolls_back_on_exception(database: Database) -> None:
     with pytest.raises(RuntimeError, match="模拟失败"):
         with database.transaction() as connection:
             connection.execute(
-                "UPDATE number_sequences SET next_value = ? WHERE sequence_key = 'degree'",
-                (99,),
+                "UPDATE numbering_rules SET sequence_width = ? WHERE rule_key = 'degree'",
+                (9,),
             )
             raise RuntimeError("模拟失败")
 
     with database.connect() as connection:
         row = connection.execute(
-            "SELECT next_value FROM number_sequences WHERE sequence_key = 'degree'"
+            "SELECT sequence_width FROM numbering_rules WHERE rule_key = 'degree'"
         ).fetchone()
-    assert row["next_value"] == 1
+    assert row["sequence_width"] == 4
 
 
 def test_transaction_rolls_back_inserted_rows(database: Database) -> None:

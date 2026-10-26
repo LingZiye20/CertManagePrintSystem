@@ -110,7 +110,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.warning_label)
 
         self.notice_label = QLabel(
-            "「恢复默认值」只恢复业务配置，不会删除学生记录、编号流水或历史数据；"
+            "「恢复默认值」只恢复业务配置，不会删除学生记录、编号或历史数据；"
             "如需清除业务数据，请使用「系统管理 → 系统重置」。"
         )
         self.notice_label.setWordWrap(True)
@@ -229,7 +229,7 @@ class SettingsDialog(QDialog):
             self,
             "恢复默认设置",
             "将恢复系统设置的默认值。\n"
-            "此操作不会删除学生记录、编号流水、模板或历史数据。\n是否继续？",
+            "此操作不会删除学生记录、证书编号、模板或历史数据。\n是否继续？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

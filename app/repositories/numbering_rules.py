@@ -10,13 +10,12 @@ from app.repositories.base import NOW_SQL, Repository, fields_of
 
 # 允许更新的字段；rule_key 为主键，不允许修改。
 WRITABLE_FIELDS: tuple[str, ...] = (
-    "rule_name",
     "fixed_text_1",
     "fixed_text_2",
     "fixed_text_3",
     "fixed_text_4",
     "sequence_width",
-    "enabled",
+    "education_levels",
 )
 
 

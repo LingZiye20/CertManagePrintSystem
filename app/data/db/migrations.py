@@ -5,7 +5,7 @@
 - ``schema_meta`` 中的 ``schema_version`` 是唯一版本来源。
 - 首次初始化在单个事务内建表、写入默认记录与版本号；任何一步失败都整体回滚。
 - 每次启动都会以 ``IF NOT EXISTS`` 补建缺失对象并补齐默认记录，因此重复初始化是幂等的，
-  不会清空或覆盖已有业务数据、用户修改过的规则与现有流水值。
+  不会清空或覆盖已有业务数据或用户修改过的规则。
 - 结构升级只能通过 ``MIGRATIONS`` 中登记的目标版本依次执行，不允许删除数据库重建。
 """
 
@@ -27,8 +27,87 @@ SCHEMA_VERSION_KEY = "schema_version"
 
 Migration = Callable[[sqlite3.Connection], None]
 
+
+def _add_education_levels_column(connection: sqlite3.Connection) -> None:
+    """v1 → v2：为编号规则增加「编号应用条件」列，不重建表、不丢数据。"""
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(numbering_rules)").fetchall()
+    }
+    if "education_levels" in columns:
+        return
+    connection.execute(
+        "ALTER TABLE numbering_rules "
+        "ADD COLUMN education_levels TEXT NOT NULL DEFAULT ''"
+    )
+
+
+def _drop_number_sequences_table(connection: sqlite3.Connection) -> None:
+    """v2 → v3：移除自动流水计数器表，改由用户手动输入起始流水号。"""
+    connection.execute("DROP TABLE IF EXISTS number_sequences")
+
+
+def _rebuild_numbering_rules_without_name_and_enabled(
+    connection: sqlite3.Connection,
+) -> None:
+    """v3 → v4：重建编号规则表，删除 rule_name 与 enabled 两列。
+
+    SQLite 无法直接删除带 CHECK 约束的列，因此在同一事务内建新表、复制数据、
+    删除旧表并重命名。fixed_text_*、sequence_width、层次选择与 updated_at 原样保留。
+    """
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(numbering_rules)").fetchall()
+    }
+    if not columns:
+        return
+    if "rule_name" not in columns and "enabled" not in columns:
+        return
+
+    levels_expression = (
+        "COALESCE(education_levels, '[]')"
+        if "education_levels" in columns
+        else "'[]'"
+    )
+    connection.execute("DROP TABLE IF EXISTS numbering_rules_new")
+    connection.execute(
+        """
+        CREATE TABLE numbering_rules_new (
+            rule_key TEXT PRIMARY KEY
+                CHECK (rule_key IN ('graduation', 'degree', 'other')),
+            fixed_text_1 TEXT NOT NULL DEFAULT '',
+            fixed_text_2 TEXT NOT NULL DEFAULT '',
+            fixed_text_3 TEXT NOT NULL DEFAULT '',
+            fixed_text_4 TEXT NOT NULL DEFAULT '',
+            sequence_width INTEGER NOT NULL DEFAULT 4 CHECK (sequence_width >= 1),
+            education_levels TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        """
+    )
+    connection.execute(
+        f"""
+        INSERT INTO numbering_rules_new (
+            rule_key, fixed_text_1, fixed_text_2, fixed_text_3, fixed_text_4,
+            sequence_width, education_levels, updated_at
+        )
+        SELECT rule_key, fixed_text_1, fixed_text_2, fixed_text_3, fixed_text_4,
+               sequence_width, {levels_expression}, updated_at
+        FROM numbering_rules
+        """
+    )
+    connection.execute("DROP TABLE numbering_rules")
+    connection.execute(
+        "ALTER TABLE numbering_rules_new RENAME TO numbering_rules"
+    )
+
+
 # 后续结构升级在此登记：{目标版本号: 迁移函数}，迁移函数在事务内执行。
-MIGRATIONS: dict[int, Migration] = {}
+MIGRATIONS: dict[int, Migration] = {
+    2: _add_education_levels_column,
+    3: _drop_number_sequences_table,
+    4: _rebuild_numbering_rules_without_name_and_enabled,
+}
 
 
 class SchemaVersionError(RuntimeError):

@@ -35,7 +35,7 @@ def _create(students: StudentService, student_no: str, **values: Any) -> int:
 
 
 def _snapshot(database: Database) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, int]:
-    """核验前后对比用的业务数据快照（记录、编号流水、审计与打印记录数）。"""
+    """核验前后对比用的业务数据快照（记录、编号规则、审计与打印记录数）。"""
     with database.connect() as connection:
         records = [
             dict(row)
@@ -43,10 +43,10 @@ def _snapshot(database: Database) -> tuple[list[dict[str, Any]], list[dict[str, 
                 "SELECT * FROM certificate_records ORDER BY id"
             ).fetchall()
         ]
-        sequences = [
+        rules = [
             dict(row)
             for row in connection.execute(
-                "SELECT * FROM number_sequences ORDER BY sequence_key"
+                "SELECT * FROM numbering_rules ORDER BY rule_key"
             ).fetchall()
         ]
         log_count = int(
@@ -59,7 +59,7 @@ def _snapshot(database: Database) -> tuple[list[dict[str, Any]], list[dict[str, 
                 "total"
             ]
         )
-    return records, sequences, log_count, print_count
+    return records, rules, log_count, print_count
 
 
 # ---------------------------------------------------------------- 类型映射
@@ -338,7 +338,7 @@ def test_verification_never_writes_business_data_or_audit(
     assert after == before
     assert after[2] == before[2], "核验不应新增 operation_logs"
     assert after[0] == before[0], "核验不应修改 certificate_records"
-    assert after[1] == before[1], "核验不应改变编号流水"
+    assert after[1] == before[1], "核验不应改变编号规则"
     assert after[3] == 0, "核验不应产生打印记录"
 
 

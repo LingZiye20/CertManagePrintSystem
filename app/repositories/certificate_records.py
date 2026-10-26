@@ -172,6 +172,49 @@ class CertificateRecordRepository(Repository):
             ).fetchall()
         return self._to_dicts(rows)
 
+    def list_ids(
+        self,
+        *,
+        order_by: str = "id",
+        descending: bool = False,
+        filters: Mapping[str, str] | None = None,
+        education_levels: Sequence[str] | None = None,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[int]:
+        """按筛选与排序返回全部记录 ID（不分页）。
+
+        排序规则与 :meth:`list_records` 完全一致；``education_levels`` 非空时
+        只返回教育层次精确命中的记录，供批量编号使用。
+        """
+        order = order_clause(order_by, descending, SORTABLE_FIELDS)
+        where, filter_params = filter_clause(filters)
+        level_sql, level_params = education_level_clause(education_levels)
+        if level_sql:
+            where = f"{where} AND {level_sql}" if where else f" WHERE {level_sql}"
+        with self._read(connection) as conn:
+            rows = conn.execute(
+                f"SELECT id FROM certificate_records{where}{order}",
+                [*filter_params, *level_params],
+            ).fetchall()
+        return [int(row["id"]) for row in rows]
+
+    def list_education_levels(
+        self,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[str]:
+        """返回数据中已出现的教育层次（去重、忽略空值、按值排序）。"""
+        with self._read(connection) as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT education_level FROM certificate_records
+                WHERE education_level IS NOT NULL
+                  AND trim(education_level) <> ''
+                ORDER BY education_level ASC
+                """
+            ).fetchall()
+        return [row["education_level"] for row in rows]
+
     def list_by_ids(
         self,
         record_ids: Sequence[int],
@@ -290,6 +333,39 @@ class CertificateRecordRepository(Repository):
             ).fetchall()
         return self._to_dicts(rows)
 
+    def count_by_number_field(
+        self,
+        field: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """统计指定编号字段非空的记录数；只允许 :data:`NUMBER_FIELDS`。"""
+        _require_number_field(field)
+        with self._read(connection) as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS total FROM certificate_records "
+                f"WHERE {field} IS NOT NULL"
+            ).fetchone()
+        return int(row["total"])
+
+    def clear_number_field(
+        self,
+        field: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        """把指定编号字段全部置为 NULL，返回受影响记录数。
+
+        只操作该编号字段与 ``updated_at``，不触碰其他两类编号或业务字段。
+        """
+        _require_number_field(field)
+        with self._write(connection) as conn:
+            cursor = conn.execute(
+                f"UPDATE certificate_records SET {field} = NULL, updated_at = {NOW_SQL} "
+                f"WHERE {field} IS NOT NULL"
+            )
+            return int(cursor.rowcount)
+
     def count_records_by_photo_path(
         self,
         photo_path: str,
@@ -313,6 +389,29 @@ class CertificateRecordRepository(Repository):
         with self._read(connection) as conn:
             row = conn.execute(sql, params).fetchone()
         return int(row["total"])
+
+
+def _require_number_field(field: str) -> None:
+    """校验编号字段名，避免把用户输入当作 SQL 结构。"""
+    if field not in NUMBER_FIELDS:
+        raise ValueError(f"不支持的编号字段：{field}")
+
+
+def education_level_clause(
+    levels: Sequence[str] | None,
+) -> tuple[str, list[Any]]:
+    """生成教育层次精确匹配片段；空列表表示不限制。"""
+    if not levels:
+        return "", []
+    values = [
+        str(level).strip()
+        for level in levels
+        if isinstance(level, str) and str(level).strip()
+    ]
+    if not values:
+        return "", []
+    placeholders = ", ".join("?" for _ in values)
+    return f"education_level IN ({placeholders})", values
 
 
 def filter_clause(filters: Mapping[str, str] | None) -> tuple[str, list[Any]]:

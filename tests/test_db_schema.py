@@ -373,13 +373,55 @@ def test_deleting_certificate_record_sets_print_reference_to_null(db_path: Path)
 # ---------------------------------------------------------------------------
 
 
+def test_numbering_rules_have_education_levels_column(db_path: Path) -> None:
+    with Database(db_path).connect() as connection:
+        columns = {
+            row["name"]: row
+            for row in connection.execute("PRAGMA table_info(numbering_rules)")
+        }
+        values = [
+            row["education_levels"]
+            for row in connection.execute(
+                "SELECT education_levels FROM numbering_rules"
+            )
+        ]
+
+    assert columns["education_levels"]["type"] == "TEXT"
+    assert columns["education_levels"]["notnull"] == 1
+    assert columns["education_levels"]["dflt_value"] == "'[]'"
+    # 默认规则使用空数组，即默认未选择任何层次。
+    assert values == ["[]", "[]", "[]"]
+    # v4 起不再有规则名称与启用开关列。
+    assert "rule_name" not in columns
+    assert "enabled" not in columns
+
+
+def test_numbering_rules_column_set(db_path: Path) -> None:
+    with Database(db_path).connect() as connection:
+        columns = [
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(numbering_rules)")
+        ]
+
+    assert columns == [
+        "rule_key",
+        "fixed_text_1",
+        "fixed_text_2",
+        "fixed_text_3",
+        "fixed_text_4",
+        "sequence_width",
+        "education_levels",
+        "updated_at",
+    ]
+
+
 @pytest.mark.parametrize("rule_key", ["invalid", "GRADUATION", ""])
 def test_numbering_rule_key_is_limited(db_path: Path, rule_key: str) -> None:
     with pytest.raises(sqlite3.IntegrityError):
         with Database(db_path).transaction() as connection:
             connection.execute(
-                "INSERT INTO numbering_rules (rule_key, rule_name) VALUES (?, ?)",
-                (rule_key, "非法规则"),
+                "INSERT INTO numbering_rules (rule_key) VALUES (?)",
+                (rule_key,),
             )
 
 
@@ -393,20 +435,15 @@ def test_sequence_width_must_be_positive(db_path: Path, width: int) -> None:
             )
 
 
-def test_enabled_accepts_only_zero_or_one(db_path: Path) -> None:
-    with pytest.raises(sqlite3.IntegrityError):
-        with Database(db_path).transaction() as connection:
-            connection.execute(
-                "UPDATE numbering_rules SET enabled = 2 WHERE rule_key = 'graduation'"
+def test_number_sequences_table_is_removed(db_path: Path) -> None:
+    with Database(db_path).connect() as connection:
+        tables = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
-
-
-def test_sequence_next_value_must_be_at_least_one(db_path: Path) -> None:
-    with pytest.raises(sqlite3.IntegrityError):
-        with Database(db_path).transaction() as connection:
-            connection.execute(
-                "UPDATE number_sequences SET next_value = 0 WHERE sequence_key = 'graduation'"
-            )
+        }
+    assert "number_sequences" not in tables
 
 
 def test_print_snapshot_must_not_be_blank(db_path: Path) -> None:

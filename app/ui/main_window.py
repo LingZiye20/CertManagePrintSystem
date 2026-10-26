@@ -122,7 +122,6 @@ class MainWindow(QMainWindow):
             self.student_page = StudentPage(
                 service,
                 self,
-                numbering_service=self.numbering_service,
                 photo_service=self.photo_service,
                 import_service=self.import_service,
                 export_service=self.export_service,
@@ -237,23 +236,28 @@ class MainWindow(QMainWindow):
             )
 
     def _build_numbering_menu(self) -> None:
-        page = self.student_page
         service = self.numbering_service
-        if page is None or service is None:  # pragma: no cover - 仅防御
+        if self.student_page is None or service is None:  # pragma: no cover - 仅防御
             return
-        numbering_menu = self.menuBar().addMenu("编号管理(&N)")
+        encoding_menu = self.menuBar().addMenu("证书编码(&C)")
 
-        rule_action = QAction("编号规则设置(&R)", self)
-        rule_action.triggered.connect(
-            lambda: NumberingRuleDialog(
-                service, self, initial_type=self.default_certificate_type
-            ).exec()
-        )
-        numbering_menu.addAction(rule_action)
+        encoding_action = QAction("证书编码(&C)…", self)
+        encoding_action.triggered.connect(self.open_certificate_code_dialog)
+        encoding_menu.addAction(encoding_action)
 
-        generate_action = QAction("生成证书编号(&G)", self)
-        generate_action.triggered.connect(page.generate_number_for_selected)
-        numbering_menu.addAction(generate_action)
+    def open_certificate_code_dialog(self) -> None:
+        """打开证书编码对话框；批量编号使用学生页当前筛选与排序。"""
+        service = self.numbering_service
+        page = self.student_page
+        if service is None or page is None:  # pragma: no cover - 仅防御
+            return
+        NumberingRuleDialog(
+            service,
+            self,
+            record_ids_provider=page.filtered_record_ids,
+            education_level_provider=service.list_education_levels,
+            on_numbered=page.reload,
+        ).exec()
 
     def _build_template_menu(self) -> None:
         service = self.template_service

@@ -46,6 +46,71 @@ def test_create_accepts_all_37_fields_and_photo_path(repo: CertificateRecordRepo
     assert row["photo_path"] == "00123.jpg"
 
 
+def test_list_education_levels_dedupes_and_ignores_blank(
+    repo: CertificateRecordRepository,
+) -> None:
+    repo.create({"student_no": "S-1", "education_level": "本科"})
+    repo.create({"student_no": "S-2", "education_level": "专科"})
+    repo.create({"student_no": "S-3", "education_level": "本科"})
+    repo.create({"student_no": "S-4", "education_level": None})
+    repo.create({"student_no": "S-5", "education_level": "   "})
+
+    assert repo.list_education_levels() == ["专科", "本科"]
+
+
+def test_list_ids_filters_by_education_levels(
+    repo: CertificateRecordRepository,
+) -> None:
+    bachelor = repo.create({"student_no": "S-1", "education_level": "本科"})
+    junior = repo.create({"student_no": "S-2", "education_level": "专科"})
+    another_bachelor = repo.create({"student_no": "S-3", "education_level": "本科"})
+    no_level = repo.create({"student_no": "S-4"})
+
+    assert repo.list_ids(order_by="student_no") == [
+        bachelor,
+        junior,
+        another_bachelor,
+        no_level,
+    ]
+    assert repo.list_ids(
+        order_by="student_no", education_levels=["本科"]
+    ) == [bachelor, another_bachelor]
+    assert repo.list_ids(
+        order_by="student_no", education_levels=["本科", "专科"]
+    ) == [bachelor, junior, another_bachelor]
+    assert repo.list_ids(order_by="student_no", education_levels=[]) == [
+        bachelor,
+        junior,
+        another_bachelor,
+        no_level,
+    ]
+
+
+def test_count_and_clear_number_field(repo: CertificateRecordRepository) -> None:
+    first = repo.create(
+        {
+            "student_no": "S-1",
+            "certificate_no": "NO-1",
+            "degree_certificate_no": "XW-1",
+        }
+    )
+    repo.create({"student_no": "S-2", "certificate_no": "NO-2"})
+
+    assert repo.count_by_number_field("certificate_no") == 2
+    assert repo.count_by_number_field("degree_certificate_no") == 1
+
+    assert repo.clear_number_field("certificate_no") == 2
+
+    assert repo.count_by_number_field("certificate_no") == 0
+    assert repo.get(first)["degree_certificate_no"] == "XW-1"
+
+    for field in ("student_no", "unknown"):
+        with pytest.raises(ValueError):
+            repo.count_by_number_field(field)
+        with pytest.raises(ValueError):
+            repo.clear_number_field(field)
+
+
 def test_create_rejects_unknown_or_empty_fields(repo: CertificateRecordRepository) -> None:
     with pytest.raises(ValueError):
         repo.create({"student_no": "00123", "unknown_field": "x"})

@@ -24,7 +24,7 @@ class DuplicateValueError(ServiceError):
 
 
 class NumberConflictError(ServiceError):
-    """证书编号与已有记录冲突，本次生成已回滚且未消耗流水。"""
+    """证书编号与已有记录冲突，本次生成已整体回滚。"""
 
 
 class RecordNotFoundError(ServiceError):

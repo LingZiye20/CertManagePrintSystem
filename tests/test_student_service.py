@@ -304,6 +304,56 @@ def test_search_pagination_sort_and_filter(student_service: StudentService) -> N
     assert descending.records[0]["student_no"] == "S-24"
 
 
+def test_list_ids_covers_all_pages_with_filters_and_sort(
+    student_service: StudentService,
+) -> None:
+    for student_no in _student_no_sequence(25):
+        student_service.create_record({"student_no": student_no, "name": "同名"})
+
+    ids = student_service.list_ids()
+    assert len(ids) == 25
+    assert [student_service.records.get(record_id)["student_no"] for record_id in ids] == [
+        f"S-{index:02d}" for index in range(25)
+    ]
+
+    descending = student_service.list_ids(order_by="student_no", descending=True)
+    assert student_service.records.get(descending[0])["student_no"] == "S-24"
+
+    filtered = student_service.list_ids({"name": "同名"})
+    assert filtered == ids
+
+    empty = student_service.list_ids({"student_no": "不存在"})
+    assert empty == []
+
+    with pytest.raises(ValidationError):
+        student_service.list_ids(order_by="unknown")
+
+    with pytest.raises(ValidationError):
+        student_service.list_ids(education_levels="本科")  # type: ignore[arg-type]
+
+
+def test_list_ids_filters_by_education_levels(
+    student_service: StudentService,
+) -> None:
+    bachelor = student_service.create_record(
+        {"student_no": "S-01", "education_level": "本科"}
+    )
+    student_service.create_record({"student_no": "S-02", "education_level": "专科"})
+    another = student_service.create_record(
+        {"student_no": "S-03", "education_level": "本科"}
+    )
+    student_service.create_record({"student_no": "S-04"})
+
+    assert student_service.list_ids(education_levels=["本科"]) == [bachelor, another]
+    assert student_service.list_ids(education_levels=["本科", "专科"]) == [
+        bachelor,
+        student_service.records.get_by_student_no("S-02")["id"],
+        another,
+    ]
+    # 全部为空层次记录不匹配任何层次条件。
+    assert student_service.list_ids(education_levels=["硕士"]) == []
+
+
 def test_search_out_of_range_page_clamps(student_service: StudentService) -> None:
     for student_no in _student_no_sequence(5):
         student_service.create_record({"student_no": student_no})

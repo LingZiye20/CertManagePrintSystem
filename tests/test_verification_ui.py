@@ -64,10 +64,10 @@ def _snapshot(database: Database) -> tuple[list[dict[str, Any]], list[dict[str, 
                 "SELECT * FROM certificate_records ORDER BY id"
             ).fetchall()
         ]
-        sequences = [
+        rules = [
             dict(row)
             for row in connection.execute(
-                "SELECT * FROM number_sequences ORDER BY sequence_key"
+                "SELECT * FROM numbering_rules ORDER BY rule_key"
             ).fetchall()
         ]
         log_count = int(
@@ -80,7 +80,7 @@ def _snapshot(database: Database) -> tuple[list[dict[str, Any]], list[dict[str, 
                 "total"
             ]
         )
-    return records, sequences, log_count, print_count
+    return records, rules, log_count, print_count
 
 
 # ---------------------------------------------------------------- 打开与类型
@@ -381,5 +381,5 @@ def test_dialog_never_changes_business_data(
     after = _snapshot(service.database)
     assert after == before
     assert after[2] == before[2], "核验不应新增 operation_logs"
-    assert after[1] == before[1], "核验不应改变编号流水"
+    assert after[1] == before[1], "核验不应改变编号规则"
     assert after[3] == 0, "核验不应产生打印记录"

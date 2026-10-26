@@ -99,9 +99,6 @@ def _seed(database: Database, paths: AppPaths) -> None:
             "WHERE rule_key = 'graduation'"
         )
         connection.execute(
-            "UPDATE number_sequences SET next_value = 7 WHERE sequence_key = 'graduation'"
-        )
-        connection.execute(
             "INSERT INTO operation_logs (operation_type, target_type, summary, result) "
             "VALUES ('student_create', 'certificate_record', '旧审计', 'success')"
         )
@@ -155,7 +152,7 @@ def test_builtin_templates_restored(
     assert all(item.is_builtin for item in summaries)
 
 
-def test_numbering_rules_and_sequences_restored(
+def test_numbering_rules_restored(
     service: ResetService, repository_database: Database, app_paths: AppPaths
 ) -> None:
     _seed(repository_database, app_paths)
@@ -167,17 +164,15 @@ def test_numbering_rules_and_sequences_restored(
         rule = connection.execute(
             "SELECT * FROM numbering_rules WHERE rule_key = 'graduation'"
         ).fetchone()
-        sequence = connection.execute(
-            "SELECT * FROM number_sequences WHERE sequence_key = 'graduation'"
-        ).fetchone()
     assert rule["fixed_text_1"] == ""
     assert rule["sequence_width"] == 4
-    assert rule["enabled"] == 1
-    assert sequence["next_value"] == 1
+    assert rule["education_levels"] == "[]"
 
-    record_id = StudentService(repository_database).create_record({"student_no": "S-9"})
-    generated = NumberingService(repository_database).generate_number(record_id, "graduation")
-    assert generated.number == "0001"
+    # 重置不涉及任何流水计数器：手写起始值即可重新编号。
+    numbering = NumberingService(repository_database)
+    assert numbering.preview("graduation", 1).number == "0001"
+    # app_settings 被清空后，上次证书类型回退到毕结业证书。
+    assert numbering.get_last_type() == "graduation"
 
 
 def test_photos_removed_and_unrelated_files_kept(
@@ -237,12 +232,12 @@ def test_schema_and_metadata_preserved(
     service.reset_system()
 
     assert repository_database.db_path.exists()
-    assert get_schema_version(repository_database.db_path) == 1
+    assert get_schema_version(repository_database.db_path) == 4
     with repository_database.connect() as connection:
         row = connection.execute(
             "SELECT value FROM schema_meta WHERE key = 'schema_version'"
         ).fetchone()
-    assert row["value"] == "1"
+    assert row["value"] == "4"
 
 
 def test_staging_failure_leaves_everything_unchanged(
@@ -421,10 +416,13 @@ def test_repeated_reset_is_stable(
     assert first.success and second.success
     assert len(service.template_service.list_templates()) == 3
     with repository_database.connect() as connection:
-        sequence = connection.execute(
-            "SELECT next_value FROM number_sequences WHERE sequence_key = 'degree'"
-        ).fetchone()
-    assert sequence["next_value"] == 1
+        tables = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert "number_sequences" not in tables
 
 
 def test_reset_keeps_print_repository_readable(
@@ -465,10 +463,10 @@ def test_app_can_start_and_use_core_features_after_reset(
     _seed(repository_database, app_paths)
     service.reset_system()
 
-    assert initialize_database(repository_database.db_path) == 1
+    assert initialize_database(repository_database.db_path) == 4
     record_id = StudentService(repository_database).create_record(
         {"student_no": "S-AFTER", "name": "重置后"}
     )
     assert record_id > 0
-    assert NumberingService(repository_database).preview("graduation").sequence_value == 1
+    assert NumberingService(repository_database).preview("graduation", 1).sequence_value == 1
     assert len(service.template_service.list_templates()) == 3

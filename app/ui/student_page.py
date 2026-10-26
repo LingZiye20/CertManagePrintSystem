@@ -35,9 +35,7 @@ from app.services import (
     ExcelExportService,
     ExcelImportService,
     ExportResult,
-    GeneratedNumber,
     ImportResult,
-    NumberingService,
     PhotoService,
     PrintService,
     ServiceError,
@@ -51,7 +49,6 @@ from app.services import (
     StudentService,
 )
 from app.ui.import_result_dialog import ImportResultDialog
-from app.ui.numbering_dialog import NumberingDialog
 from app.ui.print_dialog import PrintDialog
 from app.ui.student_dialog import PHOTO_FILE_FILTER, StudentDialog
 from app.ui.verification_dialog import VerificationDialog
@@ -244,7 +241,6 @@ class StudentPage(QWidget):
         service: StudentService,
         parent: QWidget | None = None,
         *,
-        numbering_service: NumberingService | None = None,
         photo_service: PhotoService | None = None,
         import_service: ExcelImportService | None = None,
         export_service: ExcelExportService | None = None,
@@ -256,7 +252,6 @@ class StudentPage(QWidget):
     ) -> None:
         super().__init__(parent)
         self.service = service
-        self.numbering_service = numbering_service
         self.photo_service = photo_service
         self.import_service = import_service
         self.import_action: QAction | None = None
@@ -300,10 +295,10 @@ class StudentPage(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setColumnWidth(0, 40)
         header = self.table.horizontalHeader()
-        header.setSectionsClickable(True)
+        # 表头不响应鼠标点击：排序只作为内部状态维护，避免误触改变排序。
+        header.setSectionsClickable(False)
         header.setStretchLastSection(True)
         header.setSortIndicatorShown(True)
-        header.sectionClicked.connect(self._on_header_clicked)
         self._sync_sort_indicator()
         self.table.doubleClicked.connect(lambda _index: self.edit_selected())
         self.table.selectionModel().selectionChanged.connect(self._sync_action_buttons)
@@ -359,8 +354,6 @@ class StudentPage(QWidget):
         self.edit_button.clicked.connect(self.edit_selected)
         self.delete_button = QPushButton("删除")
         self.delete_button.clicked.connect(self.delete_selected)
-        self.generate_number_button = QPushButton("生成编号")
-        self.generate_number_button.clicked.connect(self.generate_number_for_selected)
         self.print_button = QPushButton("打印证书")
         self.print_button.clicked.connect(self.print_selected)
         self.verify_button = QPushButton("核验证书")
@@ -370,7 +363,6 @@ class StudentPage(QWidget):
 
         row.addWidget(self.edit_button)
         row.addWidget(self.delete_button)
-        row.addWidget(self.generate_number_button)
         row.addWidget(self.print_button)
         row.addWidget(self.verify_button)
         row.addWidget(self.refresh_button)
@@ -449,6 +441,14 @@ class StudentPage(QWidget):
             self._show_error("查询失败", "发生未预期错误，请查看日志后重试。")
             return
         self._apply_result(result)
+
+    def filtered_record_ids(self) -> list[int]:
+        """按当前筛选与排序返回全部记录 ID（跨分页），供批量编号使用。"""
+        return self.service.list_ids(
+            self.filters(),
+            order_by=self._order_by,
+            descending=self._descending,
+        )
 
     def apply_filters(self) -> None:
         """应用筛选条件并从第一页开始查询。"""
@@ -632,28 +632,6 @@ class StudentPage(QWidget):
         self.message_label.setText(message)
         self.reload()
         QMessageBox.information(self, "照片设置成功", message)
-
-    def generate_number_for_selected(self) -> None:
-        """为当前选中记录打开编号预览/生成对话框。"""
-        if self.numbering_service is None:
-            self._show_info("当前未启用证书编号功能")
-            return
-        record = self._selected_record()
-        if record is None:
-            self._show_info("请先选择要生成编号的记录")
-            return
-
-        def on_generated(result: GeneratedNumber) -> None:
-            self.message_label.setText(f"编号生成成功：{result.number}")
-            self.reload()
-
-        dialog = NumberingDialog(
-            self.numbering_service,
-            record,
-            self,
-            on_generated=on_generated,
-        )
-        dialog.exec()
 
     # ------------------------------------------------------------------ 勾选与打印
 
@@ -936,9 +914,6 @@ class StudentPage(QWidget):
         has_selection = self._selected_record() is not None
         self.edit_button.setEnabled(has_selection)
         self.delete_button.setEnabled(has_selection)
-        self.generate_number_button.setEnabled(
-            has_selection and self.numbering_service is not None
-        )
         self._set_import_enabled(self.import_service is not None)
         self.print_button.setEnabled(self.print_service is not None)
 

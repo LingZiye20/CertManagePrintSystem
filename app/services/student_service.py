@@ -269,6 +269,41 @@ class StudentService:
             logger.exception("读取打印数据失败")
             raise DataAccessError("读取打印数据失败，请稍后重试") from exc
 
+    def list_ids(
+        self,
+        filters: Mapping[str, str] | None = None,
+        *,
+        order_by: str = "student_no",
+        descending: bool = False,
+        education_levels: Sequence[str] | None = None,
+    ) -> list[int]:
+        """返回当前筛选与排序下的全部记录 ID（不分页，顺序确定）。
+
+        供批量编号使用：作用范围是当前筛选结果全集，跨分页。
+        ``education_levels`` 非空时按教育层次精确过滤。
+
+        Raises:
+            ValidationError: 排序、筛选字段或层次条件不合法。
+            DataAccessError: 数据库读取失败。
+        """
+        resolved_filters = self._normalize_filters(filters or {})
+        if order_by not in SORTABLE_FIELDS:
+            raise ValidationError(f"不支持的排序字段：{order_by}")
+        if not isinstance(descending, bool):
+            raise ValidationError("排序方向必须为布尔值")
+        levels = _normalize_education_levels(education_levels)
+
+        try:
+            return self.records.list_ids(
+                order_by=order_by,
+                descending=descending,
+                filters=resolved_filters,
+                education_levels=levels,
+            )
+        except sqlite3.Error as exc:
+            logger.exception("读取筛选记录 ID 失败")
+            raise DataAccessError("读取筛选记录失败，请稍后重试") from exc
+
     def records_by_ids(self, record_ids: Sequence[int]) -> list[dict[str, Any]]:
         """按给定顺序返回记录快照；不存在的 ID 直接忽略。
 
@@ -404,6 +439,25 @@ class StudentService:
             )
         except Exception:  # noqa: BLE001 - 审计失败不得覆盖原始异常
             logger.exception("失败审计日志写入失败；原始错误：%s", message)
+
+
+def _normalize_education_levels(
+    levels: Sequence[str] | None,
+) -> list[str] | None:
+    """校验教育层次筛选：去空白、去重、丢弃空项；``None`` 表示不过滤。"""
+    if levels is None:
+        return None
+    if isinstance(levels, (str, bytes)) or not isinstance(levels, Sequence):
+        raise ValidationError("层次条件必须是字符串列表")
+
+    normalized: list[str] = []
+    for level in levels:
+        if not isinstance(level, str):
+            raise ValidationError("层次条件必须是字符串列表")
+        text = level.strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized or None
 
 
 def _audit_summary(

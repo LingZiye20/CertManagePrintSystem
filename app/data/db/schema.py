@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 4
 
 # C.2 规定的 37 个 Excel 字段（顺序即 Excel 列顺序）。
 EXCEL_FIELD_NAMES: tuple[str, ...] = (
@@ -50,7 +50,7 @@ EXCEL_FIELD_NAMES: tuple[str, ...] = (
     "other_certificate_no",
 )
 
-# 基础 Schema（v1）。所有语句使用 IF NOT EXISTS，便于重复初始化时补建缺失对象。
+# 基础 Schema（v4）。所有语句使用 IF NOT EXISTS，便于重复初始化时补建缺失对象。
 BASE_SCHEMA_SQL: tuple[str, ...] = (
     """
     CREATE TABLE IF NOT EXISTS schema_meta (
@@ -112,21 +112,12 @@ BASE_SCHEMA_SQL: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS numbering_rules (
         rule_key TEXT PRIMARY KEY
             CHECK (rule_key IN ('graduation', 'degree', 'other')),
-        rule_name TEXT NOT NULL CHECK (length(trim(rule_name)) > 0),
         fixed_text_1 TEXT NOT NULL DEFAULT '',
         fixed_text_2 TEXT NOT NULL DEFAULT '',
         fixed_text_3 TEXT NOT NULL DEFAULT '',
         fixed_text_4 TEXT NOT NULL DEFAULT '',
         sequence_width INTEGER NOT NULL DEFAULT 4 CHECK (sequence_width >= 1),
-        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS number_sequences (
-        sequence_key TEXT PRIMARY KEY
-            CHECK (sequence_key IN ('graduation', 'degree', 'other')),
-        next_value INTEGER NOT NULL DEFAULT 1 CHECK (next_value >= 1),
+        education_levels TEXT NOT NULL DEFAULT '[]',
         updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     )
     """,

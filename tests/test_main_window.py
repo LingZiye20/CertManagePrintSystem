@@ -70,6 +70,53 @@ def test_template_designer_menu_is_wired(
     assert captured == [window.template_service]
 
 
+def test_certificate_code_menu_is_wired(
+    qapp: QApplication,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QMenu
+
+    from app.ui import main_window as main_window_module
+
+    window, _context = _build_window(tmp_path, qapp)
+
+    code_menu = next(
+        menu for menu in window.findChildren(QMenu) if menu.title() == "证书编码(&C)"
+    )
+    action_texts = [
+        action.text() for action in code_menu.actions() if not action.isSeparator()
+    ]
+    assert action_texts == ["证书编码(&C)…"]
+    all_action_texts = [action.text() for action in window.findChildren(QAction)]
+    assert "生成证书编号(&G)" not in all_action_texts
+
+    captured: list[tuple[object, dict[str, object]]] = []
+
+    class _FakeDialog:
+        def __init__(self, service: object, parent: object = None, **kwargs: object) -> None:
+            captured.append((service, kwargs))
+
+        def exec(self) -> int:
+            return 0
+
+    monkeypatch.setattr(main_window_module, "NumberingRuleDialog", _FakeDialog)
+    actions = {action.text(): action for action in code_menu.actions()}
+    actions["证书编码(&C)…"].trigger()
+
+    assert len(captured) == 1
+    service, kwargs = captured[0]
+    assert service is window.numbering_service
+    page = window.student_page
+    assert page is not None
+    assert kwargs["record_ids_provider"] == page.filtered_record_ids
+    assert kwargs["education_level_provider"] == window.numbering_service.list_education_levels
+    assert kwargs["on_numbered"] == page.reload
+
+    window.close()
+
+
 def _build_window(tmp_path, qapp: QApplication):
     from PySide6.QtCore import QSettings
 
@@ -245,7 +292,7 @@ def test_menu_bar_order_starts_with_system_and_has_no_file_menu(
         "系统管理(&S)",
         "数据管理(&D)",
         "照片管理(&Z)",
-        "编号管理(&N)",
+        "证书编码(&C)",
         "模板管理(&T)",
         "打印管理(&P)",
         "核验管理(&V)",

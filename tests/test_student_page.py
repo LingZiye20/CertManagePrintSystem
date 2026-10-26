@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from app.bootstrap import bootstrap
 from app.config.paths import AppPaths
@@ -48,6 +48,28 @@ def test_empty_state_page(page: StudentPage) -> None:
     assert page.next_button.isEnabled() is False
     assert page.edit_button.isEnabled() is False
     assert page.delete_button.isEnabled() is False
+
+
+def test_generate_number_entry_is_removed(page: StudentPage) -> None:
+    assert not hasattr(page, "generate_number_button")
+    assert not hasattr(page, "generate_number_for_selected")
+    button_texts = [button.text() for button in page.findChildren(QPushButton)]
+    assert "生成编号" not in button_texts
+
+
+def test_filtered_record_ids_respect_filters_and_sort(
+    student_service: StudentService, page: StudentPage, qapp: QApplication
+) -> None:
+    second = student_service.create_record({"student_no": "S-02", "name": "甲"})
+    first = student_service.create_record({"student_no": "S-01", "name": "乙"})
+    page.reload()
+    qapp.processEvents()
+
+    # 默认按学号升序，且覆盖全部记录（不受分页影响）。
+    assert page.filtered_record_ids() == [first, second]
+
+    page.name_input.setText("甲")
+    assert page.filtered_record_ids() == [second]
 
 
 def test_pagination_buttons_and_row_counts(
@@ -96,7 +118,15 @@ def test_filter_search_and_clear(
     assert "共 2 条" in page.summary_label.text()
 
 
-def test_header_click_toggles_sort(
+def test_table_header_click_is_disabled(
+    student_service: StudentService, page: StudentPage
+) -> None:
+    header = page.table.horizontalHeader()
+    assert header.sectionsClickable() is False
+    assert page.table.isSortingEnabled() is False
+
+
+def test_sort_state_change_updates_order(
     student_service: StudentService, page: StudentPage, qapp: QApplication
 ) -> None:
     for student_no in ("S-2", "S-1", "S-3"):
